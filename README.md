@@ -30,7 +30,8 @@ LineAC is a native **Win32 autoclicker written in C++**. The whole interface is 
 - **HighCPS Button** — a second, parallel left-click channel with its own CPS and bind; its rate stacks on top of the main left channel.
 - **BlockHit** — auto-fires the right button while you physically hold RMB, with its own rate and an optional pause bind (Hold/Toggle).
 - **Window targeting** — click anywhere, or restrict clicking to specific windows (up to 64) with the built-in picker.
-- **Live status indicator**, single-instance guard, and a draggable borderless window.
+- **Console** — an always-on-top, never-focus-stealing panel with the real measured CPS per channel plus timing diagnostics (timer resolution, priority, throttling state). Opened from the gear icon.
+- **Settings panel** on the gear icon, single-instance guard, and a draggable borderless window.
 
 ## Usage
 
@@ -40,7 +41,10 @@ LineAC is a native **Win32 autoclicker written in C++**. The whole interface is 
 4. Choose a **Mode** (Hold / Toggle) and a **Pattern** (Legit / Blatant / Custom).
 5. *(optional)* configure the extra modules below.
 6. Press **Apply**.
-7. Hold (or toggle) your bind — clicking starts in the focused window.
+7. Hold (or toggle) your bind - clicking starts in the focused window.
+
+To confirm the rate you set is the rate you get, open the gear icon (bottom
+right) and turn on **Show Console**.
 
 ### Configuring the modules
 
@@ -76,6 +80,9 @@ This produces a single `LineCord.exe`; intermediate `.obj` files are cleaned up 
 
 - **Portable by design** — all settings live in memory. LineAC creates no config files and writes nothing to the registry; delete the `.exe` and nothing of it remains.
 - Settings are **not saved** between runs — reconfigure on launch.
-- CPS values are clamped to the **0–100** range.
+- CPS values are clamped to the **0-100** range.
+- The process runs at high priority and opts out of Windows background throttling so the rate holds up while the window is minimised and a game has focus.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed between releases.
 
 > Provided as-is for personal use. Automation tools may be against the terms of service of some games or applications — use responsibly.
