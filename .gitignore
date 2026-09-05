@@ -1,0 +1,14 @@
+# Build output
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+LineAC.exe
+
+# Visual Studio
+.vs/
+*.user
+
+# Keep published builds
+!Release/**/*.exe
