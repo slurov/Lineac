@@ -3,7 +3,7 @@
 cl /nologo /MT /W4 /EHsc /O2 /utf-8 /DUNICODE /D_UNICODE ^
    main.cpp LineacEngine.cpp BindManager.cpp WindowSelector.cpp Console.cpp ^
    /Fe:LineAC.exe ^
-   /link /SUBSYSTEM:WINDOWS /MANIFEST:EMBED user32.lib gdi32.lib comctl32.lib winmm.lib advapi32.lib
+   /link /SUBSYSTEM:WINDOWS /MANIFEST:EMBED user32.lib gdi32.lib comctl32.lib winmm.lib advapi32.lib msimg32.lib gdiplus.lib dwmapi.lib
 if errorlevel 1 goto :error
 
 echo.

@@ -2,6 +2,9 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <mmsystem.h>
+#include <dwmapi.h>
+#include <objidl.h>
+#include <gdiplus.h>
 #include <stdlib.h>
 #include <math.h>
 #include "LineacEngine.h"
@@ -16,368 +19,119 @@
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "advapi32.lib")
 #pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "dwmapi.lib")
 #pragma comment(linker, "\"/manifestdependency:type='win32' "                 \
     "name='Microsoft.Windows.Common-Controls' version='6.0.0.0' "             \
     "processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 #endif
 
-#define WIN_W        400
-#define TITLE_H      34
-#define STATUS_H     24
-#define PAD_X        14
-#define CONTENT_TOP  44
-#define GAP          6
-#define HEAD_H       22
-#define ROW_H        30
-#define ITEM_H       28
-#define ID_EDIT_L        201
-#define ID_EDIT_R        202
-#define ID_EDIT_BPS      203
-#define ID_EDIT_HIGHCPS  204
-#define ID_EDIT_DURATION 205
-#define ID_EDIT_CHANCE   206
-#define ID_EDIT_STRENGTH 207
-#define ID_EDIT_LIMITED  208
-#define TIMER_STATUS     1
-#define TIMER_ANIM       2
-#define ANIM_MS          16
+namespace G = Gdiplus;
 
-#define C_BG            RGB(0x18,0x1b,0x23)
-#define C_BAR           RGB(0x13,0x15,0x1c)
-#define C_CARD          RGB(0x20,0x23,0x2e)
-#define C_CARDBORDER    RGB(0x2b,0x2e,0x3a)
-#define C_SEP           RGB(0x27,0x2a,0x35)
-#define C_ACCENT        RGB(0x1a,0x7d,0xff)
-#define C_ACCENT_HOVER  RGB(0x2e,0x8a,0xff)
-#define C_LOGO_LINE     RGB(0xee,0xf1,0xf8)
-#define C_LABEL         RGB(0xb8,0xbd,0xd0)
-#define C_MUTED         RGB(0x45,0x4c,0x63)
-#define C_TITLE         RGB(0x7a,0x80,0x99)
-#define C_INPUT_TXT     RGB(0xd8,0xdc,0xea)
-#define C_BORDER        RGB(0x3a,0x3d,0x49)
-#define C_TOGGLE_OFF    RGB(0x31,0x36,0x4a)
-#define C_BINDBG        RGB(0x29,0x2d,0x3e)
-#define C_BINDBG_HOVER  RGB(0x32,0x37,0x49)
-#define C_BIND_TXT      RGB(0x8a,0x93,0xad)
-#define C_BADGE_TXT     RGB(0x5a,0x62,0x78)
-#define C_WAIT_TXT      RGB(0xf5,0xa6,0x23)
-#define C_WAIT_BG       RGB(0x2a,0x27,0x21)
-#define C_WAIT_BORDER   RGB(0x6b,0x55,0x2e)
-#define C_BOUND_BG      RGB(0x1b,0x28,0x3b)
-#define C_BOUND_BORDER  RGB(0x2c,0x47,0x6b)
-#define C_SEL_DISBG     RGB(0x1c,0x1f,0x28)
-#define C_SEL_DISTXT    RGB(0x2f,0x34,0x48)
-#define C_DOT_OFF       RGB(0x2f,0x34,0x48)
-#define C_STAT_RUN      RGB(0x6e,0xa8,0xff)
-#define C_DOT_MIN       RGB(0xf5,0xa6,0x23)
-#define C_DOT_CLS       RGB(0xff,0x5f,0x57)
-#define C_POPUP_TXT     RGB(0x7a,0x80,0x99)
-#define C_POPUP_TXT1    RGB(0x9b,0xa3,0xb8)
+// ---- geometry -------------------------------------------------------------
+// One fixed-size window: header, a paged body, footer. Pages are switched with
+// the dots in the footer (or the arrow keys), the gear opens a settings sheet.
 
-enum { EL_NONE, EL_TOGGLE, EL_SEL, EL_BINDL, EL_BINDR,
-       EL_PATTERN, EL_MODE, EL_APPLY, EL_GEAR, EL_MIN, EL_CLS,
-       EL_BLOCKTOGGLE, EL_HIGHCPSTOGGLE, EL_BINDHIGHCPS, EL_BINDBLOCKPAUSE,
-       EL_BLOCKPAUSEMODE };
+#define WIN_W      700
+#define HDR_H      38
+#define FT_H       40
+#define WIN_H      420
+#define BODY_TOP   (HDR_H + 10)
+#define BODY_BOT   (WIN_H - FT_H)
+#define PAD_X      22          // body side padding
+#define COL_GAP    32          // gap between columns; a divider sits in its middle
+#define COL_L0     PAD_X       // used by the settings sheet
+#define IND        24          // label indent past the row icon
+#define ROW_H      32
+#define BAR_H      20
+#define TIMER_TICK 1
+#define TIMER_ANIM 2
+#define TICK_MS    33
+#define ANIM_MS    16
+#define WM_APP_EDITDONE (WM_APP + 1)
 
-enum BindState { BIND_NOTSET = 0, BIND_WAITING = 1, BIND_BOUND = 2 };
+#define C_BG       RGB(0x0b,0x0c,0x0f)
+#define C_EDGE     RGB(0x1a,0x1c,0x22)
+#define C_TEXT     RGB(0xf2,0xf4,0xf8)
+#define C_SOFT     RGB(0xc9,0xcd,0xd6)
+#define C_MUTED    RGB(0x6b,0x70,0x80)
+#define C_DIM      RGB(0x4a,0x4e,0x5a)
+#define C_TRACK    RGB(0x1e,0x20,0x27)
+#define C_TOG_OFF  RGB(0x24,0x26,0x2e)
+#define C_DOT      RGB(0x2a,0x2d,0x35)
+#define C_DOT_HOT  RGB(0x3a,0x3e,0x48)
+#define C_BTN      RGB(0x1a,0x1c,0x22)
+#define C_BTN_HOT  RGB(0x24,0x26,0x2e)
+#define C_FIELD    RGB(0x16,0x18,0x1d)
+#define C_ACCENT   RGB(0x1e,0x9b,0xff)
 
-static bool g_allowAll      = false;
+// ---- state ----------------------------------------------------------------
+
+enum { U_NONE, U_MS, U_PCT, U_LIMIT };
+
+// Every numeric setting: the slider, the stepper and the typed value all edit
+// the same record, and Apply reads it.
+struct Num { double v, mn, mx, step; int unit; };
+
+static Num nL      = { 20.0,  0, 100, 1, U_NONE };
+static Num nR      = { 20.0,  0, 100, 1, U_NONE };
+static Num nHigh   = { 20.0,  0, 100, 1, U_NONE };
+static Num nBps    = { 10.0,  0, 100, 1, U_NONE };
+static Num nDur    = { 5.0,   0, 100, 1, U_MS   };
+static Num nChance = { 100.0, 0, 100, 1, U_PCT  };
+static Num nStr    = { 55.0,  0, 100, 1, U_PCT  };
+static Num nLimit  = { 0.0,   0, 100, 1, U_LIMIT };
+
+static bool g_allowAll = false;
 static HWND g_targets[MAX_TARGETS];
-static int  g_targetCount   = 0;
-static int  g_bindL = 0, g_bindR = 0;
-static int  g_bindLState = BIND_NOTSET, g_bindRState = BIND_NOTSET;
+static int  g_targetCount = 0;
+static int  g_bindL = 0, g_bindR = 0, g_bindHighCps = 0, g_bindBlockPause = 0;
 static int  g_patternSel = 0;
 static int  g_modeSel    = 0;
-static bool g_blockHit   = false;
-static int  g_bindBlockPause = 0;
-static int  g_bindBlockPauseState = BIND_NOTSET;
 static int  g_blockPauseModeSel = 0;
-static bool g_highCps    = false;
-static int  g_bindHighCps = 0;
-static int  g_bindHighCpsState = BIND_NOTSET;
-static bool g_customVisible = false;
-static bool g_blatantVisible = false;
-static bool g_limitedTip = false;
-static int  g_winH = 638;
-static int  g_openCombo  = 0;
-static int  g_comboHot   = -1;
-static bool g_gearOpen    = false;
+static bool g_blockHit    = false;
+static bool g_highCps     = false;
 static bool g_showConsole = false;
-static bool g_editsHidden = false;
 
-// Toggles and the gear backdrop ease toward their target instead of snapping.
-// 0 = off/hidden, 1 = on/fully shown.
+static int  g_page     = 0;
+static int  g_pageDir  = 0;
+static bool g_gearOpen = false;
+static int* g_listen   = NULL;         // bind currently being captured
+static DWORD g_flashUntil = 0;
+static bool g_flashShown  = false;
+static bool g_lastActive  = false;
+static bool g_dwmRound = false;
+
 struct Anim { double cur, target; };
 static Anim g_aAllow   = { 0.0, 0.0 };
 static Anim g_aBlock   = { 0.0, 0.0 };
 static Anim g_aHigh    = { 0.0, 0.0 };
 static Anim g_aConsole = { 0.0, 0.0 };
 static Anim g_aGear    = { 0.0, 0.0 };
-static Anim* const g_anims[] = { &g_aAllow, &g_aBlock, &g_aHigh, &g_aConsole, &g_aGear };
-static int  g_hot        = EL_NONE;
-static bool g_lastActive = false;
-static DWORD g_flashUntil = 0;
+static Anim g_aPage    = { 1.0, 1.0 };
+static Anim* const g_anims[] = { &g_aAllow, &g_aBlock, &g_aHigh, &g_aConsole, &g_aGear, &g_aPage };
 
-static HWND  g_hEditL = NULL, g_hEditR = NULL, g_hEditBPS = NULL, g_hEditHighCps = NULL;
-static HWND  g_hEditDuration = NULL, g_hEditChance = NULL, g_hEditStrength = NULL;
-static HWND  g_hEditLimited = NULL;
+static HWND    g_hwnd  = NULL;
+static HWND    g_hEdit = NULL;          // inline editor for a typed value
+static Num*    g_editNum = NULL;
 static WNDPROC g_oldEditProc = NULL;
-static HHOOK g_rmbHook = NULL;
+static HHOOK   g_rmbHook = NULL;
+static HDC     g_measure = NULL;
+static ULONG_PTR g_gdipToken = 0;
 
-static HFONT g_fTitle, g_fLabel, g_fHead, g_fSmall, g_fInput, g_fApply, g_fArrow;
-static HBRUSH g_inputBrush, g_disabledBrush;
+static HFONT g_fTitle, g_fPage, g_fLabel, g_fCtl, g_fSmall, g_fStat, g_fHead, g_fSection;
+static HBRUSH g_fieldBrush;
 
-static RECT rcTitlebar, rcMin, rcCls;
-static RECT rcCardWindow, rcCardLMB, rcCardRMB, rcCardSettings, rcCardBlockHit, rcCardHighCps;
-static RECT rcCardCustom;
-static RECT rcToggle, rcSel, rcWinLbl;
-static RECT rcInpL, rcBindL, rcBadgeL, rcInpR, rcBindR, rcBadgeR;
-static RECT rcPattern, rcMode, rcBlockToggle, rcInpBPS, rcApply, rcStatusBar, rcGear;
-static RECT rcBlockPauseBindBtn, rcBlockPauseBadge, rcBlockPauseMode;
-static RECT rcHighCpsToggle, rcInpHighCps, rcBindHighCps, rcBadgeHighCps;
-static RECT rcInpDuration, rcInpChance, rcInpStrength;
-static RECT rcCardLimited, rcInpLimited;
+static const wchar_t* PAGES[] = { L"Clicking", L"Pattern & BlockHit" };
+#define PAGE_COUNT 2
 
-static const wchar_t* PATTERN_ITEMS[]   = { L"Legit", L"Blatant", L"Custom" };
-static const wchar_t* MODE_ITEMS[]      = { L"Hold",  L"Toggle"  };
-static const wchar_t* PAUSEMODE_ITEMS[] = { L"Hold",  L"Toggle"  };
-static int comboCount(int which) { return (which == EL_PATTERN) ? 3 : 2; }
+static const wchar_t* PATTERN_ITEMS[] = { L"Legit", L"Blatant", L"Custom" };
+static const wchar_t* MODE_ITEMS[]    = { L"Hold",  L"Toggle" };
 
-static RECT comboRectOf(int id) {
-    if (id == EL_PATTERN) return rcPattern;
-    if (id == EL_MODE)    return rcMode;
-    return rcBlockPauseMode;
-}
-static const wchar_t** comboItemsOf(int id) {
-    if (id == EL_PATTERN) return PATTERN_ITEMS;
-    if (id == EL_MODE)    return MODE_ITEMS;
-    return PAUSEMODE_ITEMS;
-}
-static int* comboSelOf(int id) {
-    if (id == EL_PATTERN) return &g_patternSel;
-    if (id == EL_MODE)    return &g_modeSel;
-    return &g_blockPauseModeSel;
-}
+// ---- small helpers --------------------------------------------------------
 
 static RECT R(int l, int t, int r, int b) { RECT x = { l, t, r, b }; return x; }
-static int  cv(int top, int h, int eh)     { return top + (h - eh) / 2; }
 
-static void FillRound(HDC dc, RECT rc, int rad, COLORREF c) {
-    HBRUSH b = CreateSolidBrush(c);
-    HGDIOBJ ob = SelectObject(dc, b);
-    HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN));
-    RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, rad * 2, rad * 2);
-    SelectObject(dc, op); SelectObject(dc, ob); DeleteObject(b);
-}
-static void FrameRound(HDC dc, RECT rc, int rad, COLORREF c) {
-    HPEN p = CreatePen(PS_SOLID, 1, c);
-    HGDIOBJ op = SelectObject(dc, p);
-    HGDIOBJ ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, rad * 2, rad * 2);
-    SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(p);
-}
-static void FillCircle(HDC dc, int cx, int cy, int r, COLORREF c) {
-    HBRUSH b = CreateSolidBrush(c);
-    HGDIOBJ ob = SelectObject(dc, b);
-    HGDIOBJ op = SelectObject(dc, GetStockObject(NULL_PEN));
-    Ellipse(dc, cx - r, cy - r, cx + r, cy + r);
-    SelectObject(dc, op); SelectObject(dc, ob); DeleteObject(b);
-}
-static void Txt(HDC dc, const wchar_t* s, RECT rc, COLORREF c, HFONT f, UINT fmt) {
-    HGDIOBJ of = SelectObject(dc, f);
-    SetBkMode(dc, TRANSPARENT); SetTextColor(dc, c);
-    DrawTextW(dc, s, -1, &rc, fmt | DT_NOPREFIX);
-    SelectObject(dc, of);
-}
-
-static void Layout() {
-    rcTitlebar = R(0, 0, WIN_W, TITLE_H);
-    int cy = TITLE_H / 2;
-    int clsCx = WIN_W - PAD_X - 7;
-    int minCx = clsCx - 20;
-    rcMin = R(minCx - 7, cy - 7, minCx + 7, cy + 7);
-    rcCls = R(clsCx - 7, cy - 7, clsCx + 7, cy + 7);
-
-    int x = PAD_X, w = WIN_W - 2 * PAD_X, y = CONTENT_TOP;
-    rcCardWindow   = R(x, y, x + w, y + 88); y += 88 + GAP;
-    rcCardLMB      = R(x, y, x + w, y + 58); y += 58 + GAP;
-    rcCardRMB      = R(x, y, x + w, y + 58); y += 58 + GAP;
-    rcCardHighCps  = R(x, y, x + w, y + 88); y += 88 + GAP;
-    rcCardSettings = R(x, y, x + w, y + 88); y += 88 + GAP;
-    if (g_customVisible) { rcCardCustom = R(x, y, x + w, y + 112); y += 112 + GAP; }
-    else                 { rcCardCustom = R(0, 0, 0, 0); }
-    if (g_blatantVisible) { rcCardLimited = R(x, y, x + w, y + 58); y += 58 + GAP; }
-    else                  { rcCardLimited = R(0, 0, 0, 0); }
-    rcCardBlockHit = R(x, y, x + w, y + 142);
-
-    int iL = x + 14, iR = x + w - 14;
-
-    int r1 = rcCardWindow.top + HEAD_H;
-    rcToggle = R(iR - 38, cv(r1, ROW_H, 21), iR, cv(r1, ROW_H, 21) + 21);
-    int r2 = r1 + ROW_H;
-    rcSel    = R(iL, cv(r2, ROW_H, 25), iL + 100, cv(r2, ROW_H, 25) + 25);
-    rcWinLbl = R(rcSel.right + 10, r2, iR, r2 + ROW_H);
-
-    int lr = rcCardLMB.top + HEAD_H;
-    rcBadgeL = R(iR - 66, cv(lr, ROW_H, 22), iR, cv(lr, ROW_H, 22) + 22);
-    rcBindL  = R(rcBadgeL.left - 8 - 64, cv(lr, ROW_H, 25), rcBadgeL.left - 8, cv(lr, ROW_H, 25) + 25);
-    rcInpL   = R(rcBindL.left - 8 - 66, cv(lr, ROW_H, 27), rcBindL.left - 8, cv(lr, ROW_H, 27) + 27);
-
-    int rr = rcCardRMB.top + HEAD_H;
-    rcBadgeR = R(iR - 66, cv(rr, ROW_H, 22), iR, cv(rr, ROW_H, 22) + 22);
-    rcBindR  = R(rcBadgeR.left - 8 - 64, cv(rr, ROW_H, 25), rcBadgeR.left - 8, cv(rr, ROW_H, 25) + 25);
-    rcInpR   = R(rcBindR.left - 8 - 66, cv(rr, ROW_H, 27), rcBindR.left - 8, cv(rr, ROW_H, 27) + 27);
-
-    int pr = rcCardSettings.top + HEAD_H;
-    rcPattern = R(iR - 150, cv(pr, ROW_H, 27), iR, cv(pr, ROW_H, 27) + 27);
-    int mr = pr + ROW_H;
-    rcMode    = R(iR - 150, cv(mr, ROW_H, 27), iR, cv(mr, ROW_H, 27) + 27);
-
-    if (g_customVisible) {
-        int cu = rcCardCustom.top + HEAD_H;
-        rcInpDuration = R(iR - 66, cv(cu, ROW_H, 27), iR, cv(cu, ROW_H, 27) + 27);
-        int cu2 = cu + ROW_H;
-        rcInpChance   = R(iR - 66, cv(cu2, ROW_H, 27), iR, cv(cu2, ROW_H, 27) + 27);
-        int cu3 = cu2 + ROW_H;
-        rcInpStrength = R(iR - 66, cv(cu3, ROW_H, 27), iR, cv(cu3, ROW_H, 27) + 27);
-    }
-
-    if (g_blatantVisible) {
-        int lu = rcCardLimited.top + HEAD_H;
-        rcInpLimited = R(iR - 66, cv(lu, ROW_H, 27), iR, cv(lu, ROW_H, 27) + 27);
-    }
-
-    int b1 = rcCardBlockHit.top + HEAD_H;
-    rcBlockToggle = R(iR - 38, cv(b1, ROW_H, 21), iR, cv(b1, ROW_H, 21) + 21);
-    int b2 = b1 + ROW_H;
-    rcInpBPS = R(iR - 66, cv(b2, ROW_H, 27), iR, cv(b2, ROW_H, 27) + 27);
-    int b3 = b2 + ROW_H;
-    rcBlockPauseBadge   = R(iR - 66, cv(b3, ROW_H, 22), iR, cv(b3, ROW_H, 22) + 22);
-    rcBlockPauseBindBtn = R(rcBlockPauseBadge.left - 8 - 64, cv(b3, ROW_H, 25), rcBlockPauseBadge.left - 8, cv(b3, ROW_H, 25) + 25);
-    int b4 = b3 + ROW_H;
-    rcBlockPauseMode = R(iR - 150, cv(b4, ROW_H, 27), iR, cv(b4, ROW_H, 27) + 27);
-
-    int hc1 = rcCardHighCps.top + HEAD_H;
-    rcHighCpsToggle = R(iR - 38, cv(hc1, ROW_H, 21), iR, cv(hc1, ROW_H, 21) + 21);
-    int hc2 = hc1 + ROW_H;
-    rcBadgeHighCps = R(iR - 66, cv(hc2, ROW_H, 22), iR, cv(hc2, ROW_H, 22) + 22);
-    rcBindHighCps  = R(rcBadgeHighCps.left - 8 - 64, cv(hc2, ROW_H, 25), rcBadgeHighCps.left - 8, cv(hc2, ROW_H, 25) + 25);
-    rcInpHighCps   = R(rcBindHighCps.left - 8 - 66, cv(hc2, ROW_H, 27), rcBindHighCps.left - 8, cv(hc2, ROW_H, 27) + 27);
-
-    int bottom = rcCardBlockHit.bottom;
-    rcApply = R((WIN_W - 100) / 2, bottom + 32, (WIN_W + 100) / 2, bottom + 32 + 32);
-    rcStatusBar = R(0, rcApply.bottom + 8, WIN_W, rcApply.bottom + 8 + STATUS_H);
-    g_winH = rcStatusBar.bottom;
-    rcGear = R(WIN_W - PAD_X - 16, rcStatusBar.top + (STATUS_H - 16) / 2,
-               WIN_W - PAD_X, rcStatusBar.top + (STATUS_H - 16) / 2 + 16);
-}
-
-static RECT comboItem(const RECT& cmb, int i) {
-    int top = cmb.bottom + 4 + i * ITEM_H;
-    return R(cmb.left, top, cmb.right, top + ITEM_H);
-}
-
-// Gear panel: a SETTINGS block on top, the credits underneath. Its height is
-// derived from GEAR_ROWS, so adding the planned Polling Rate row is a one-line
-// change rather than a re-measure.
-#define GP_W       236
-#define GP_PAD     8
-#define GP_HEAD_H  13
-#define GP_ROW_H   24
-#define GP_INFO_H  18
-#define GP_SEP_GAP 7
-#define GEAR_ROWS  1
-
-static int gearPopupH() {
-    return GP_PAD + GP_HEAD_H + 4 + GEAR_ROWS * GP_ROW_H
-         + GP_SEP_GAP + 1 + GP_SEP_GAP + 3 * GP_INFO_H + GP_PAD;
-}
-static RECT gearPopupRect() {
-    int rgt = WIN_W - PAD_X;
-    int bot = rcStatusBar.top - 8;
-    return R(rgt - GP_W, bot - gearPopupH(), rgt, bot);
-}
-static int gearRowTop(int i) {
-    return gearPopupRect().top + GP_PAD + GP_HEAD_H + 4 + i * GP_ROW_H;
-}
-static RECT gearConsoleToggle() {
-    RECT pp = gearPopupRect();
-    int t = gearRowTop(0) + (GP_ROW_H - 21) / 2;
-    return R(pp.right - 13 - 38, t, pp.right - 13, t + 21);
-}
-
-static double readCps(HWND edit) {
-    wchar_t buf[32] = {};
-    GetWindowTextW(edit, buf, 32);
-    wchar_t* end = NULL;
-    double v = wcstod(buf, &end);
-    if (end == buf) v = 0.0;
-    if (v < 0.0) v = 0.0;
-    if (v > 100.0) v = 100.0;
-    return v;
-}
-static void fmt2(double v, wchar_t* out) {
-    if (v < 0) v = 0;
-    int whole = (int)v, frac = (int)((v - whole) * 100.0 + 0.5);
-    if (frac >= 100) { whole++; frac -= 100; }
-    wsprintfW(out, L"%d.%02d", whole, frac);
-}
-
-static void DrawLogoMark(HDC dc, int ox, int oy, int S) {
-    double s = S / 96.0;
-    POINT a = { ox + (int)(30 * s + 0.5), oy + (int)(22 * s + 0.5) };
-    POINT b = { ox + (int)(30 * s + 0.5), oy + (int)(58 * s + 0.5) };
-    POINT c = { ox + (int)(62 * s + 0.5), oy + (int)(58 * s + 0.5) };
-    int strokeW = (int)(9 * s + 0.5);  if (strokeW < 2) strokeW = 2;
-    int nodeR   = (int)(7.5 * s + 0.5); if (nodeR < 2) nodeR = 2;
-    int ringR   = (int)(15 * s + 0.5);
-
-    HPEN rp = CreatePen(PS_SOLID, 1, RGB(0x22,0x3a,0x5c));
-    HGDIOBJ orp = SelectObject(dc, rp);
-    HGDIOBJ orb = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    Ellipse(dc, c.x - ringR, c.y - ringR, c.x + ringR, c.y + ringR);
-    SelectObject(dc, orb); SelectObject(dc, orp); DeleteObject(rp);
-
-    LOGBRUSH lb = { BS_SOLID, C_ACCENT, 0 };
-    HPEN lp = ExtCreatePen(PS_GEOMETRIC | PS_SOLID | PS_ENDCAP_ROUND | PS_JOIN_ROUND,
-                           strokeW, &lb, 0, NULL);
-    HGDIOBJ olp = SelectObject(dc, lp);
-    POINT pts[3] = { a, b, c };
-    Polyline(dc, pts, 3);
-    SelectObject(dc, olp); DeleteObject(lp);
-
-    FillCircle(dc, c.x, c.y, nodeR, C_ACCENT);
-}
-
-// Thin-line cog, drawn to match the status bar's existing icon weight.
-static const double GEAR_DIR[8][2] = {
-    {  1.0000,  0.0000 }, {  0.7071,  0.7071 }, {  0.0000,  1.0000 }, { -0.7071,  0.7071 },
-    { -1.0000,  0.0000 }, { -0.7071, -0.7071 }, {  0.0000, -1.0000 }, {  0.7071, -0.7071 }
-};
-
-static void DrawGear(HDC dc, int cx, int cy, COLORREF c) {
-    HPEN p = CreatePen(PS_SOLID, 1, c);
-    HGDIOBJ op = SelectObject(dc, p);
-    HGDIOBJ ob = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    Ellipse(dc, cx - 5, cy - 5, cx + 5, cy + 5);
-    Ellipse(dc, cx - 2, cy - 2, cx + 2, cy + 2);
-    for (int i = 0; i < 8; ++i) {
-        int x0 = cx + (int)(GEAR_DIR[i][0] * 4.0 + 0.5), y0 = cy + (int)(GEAR_DIR[i][1] * 4.0 + 0.5);
-        int x1 = cx + (int)(GEAR_DIR[i][0] * 7.0 + 0.5), y1 = cy + (int)(GEAR_DIR[i][1] * 7.0 + 0.5);
-        MoveToEx(dc, x0, y0, NULL); LineTo(dc, x1, y1);
-    }
-    SelectObject(dc, ob); SelectObject(dc, op); DeleteObject(p);
-}
-
-
-// Exponential ease-out: fast at first, settles in ~10 frames at 16 ms each.
-// Returns true while the value is still moving.
-static bool AnimStep(Anim& a) {
-    double d = a.target - a.cur;
-    if (fabs(d) < 0.004) { a.cur = a.target; return false; }
-    a.cur += d * 0.26;
-    return true;
-}
 static COLORREF Lerp(COLORREF a, COLORREF b, double t) {
     if (t < 0.0) t = 0.0;
     if (t > 1.0) t = 1.0;
@@ -387,447 +141,962 @@ static COLORREF Lerp(COLORREF a, COLORREF b, double t) {
     return RGB(r, g, bl);
 }
 
-// One drawer for every switch in the UI: the track colour and the thumb both
-// follow the same 0..1 progress, so they slide instead of jumping.
-static void DrawToggle(HDC dc, const RECT& rc, double t) {
-    int h = rc.bottom - rc.top;
-    FillRound(dc, rc, h / 2, Lerp(C_TOGGLE_OFF, C_ACCENT, t));
-    int x0 = rc.left + 3;
-    int x1 = rc.right - 3 - 15;
-    int x  = x0 + (int)((x1 - x0) * t + 0.5);
-    FillCircle(dc, x + 7, rc.top + 3 + 7, 7, RGB(255, 255, 255));
+static G::Color GC(COLORREF c, BYTE a = 255) {
+    return G::Color(a, GetRValue(c), GetGValue(c), GetBValue(c));
 }
 
-// ---- backdrop blur -------------------------------------------------------
-// GDI's StretchBlt does not interpolate when it scales up, so the old
-// shrink-and-enlarge trick produced visible blocks. This is a real separable
-// box blur over the pixels instead; three passes read as a gaussian.
-
-static HBITMAP MakeDib(HDC ref, int w, int h, BYTE** bits) {
-    BITMAPINFO bi = {};
-    bi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-    bi.bmiHeader.biWidth       = w;
-    bi.bmiHeader.biHeight      = -h;            // top-down
-    bi.bmiHeader.biPlanes      = 1;
-    bi.bmiHeader.biBitCount    = 32;
-    bi.bmiHeader.biCompression = BI_RGB;
-    void* p = NULL;
-    HBITMAP b = CreateDIBSection(ref, &bi, DIB_RGB_COLORS, &p, NULL, 0);
-    *bits = (BYTE*)p;
-    return b;
-}
-
-// One pass along an arbitrary axis, so the same code does rows and columns.
-// `step` walks the axis, `line` jumps to the next row/column, both in bytes.
-static void BlurAxis(const BYTE* src, BYTE* dst, int n, int lines, int step, int line, int r) {
-    int span = r * 2 + 1;
-    for (int l = 0; l < lines; ++l) {
-        const BYTE* s = src + (size_t)l * line;
-        BYTE*       d = dst + (size_t)l * line;
-        int sb = 0, sg = 0, sr = 0;
-        for (int i = -r; i <= r; ++i) {
-            int k = i < 0 ? 0 : (i >= n ? n - 1 : i);
-            const BYTE* p = s + (size_t)k * step;
-            sb += p[0]; sg += p[1]; sr += p[2];
-        }
-        for (int i = 0; i < n; ++i) {
-            BYTE* o = d + (size_t)i * step;
-            o[0] = (BYTE)(sb / span);
-            o[1] = (BYTE)(sg / span);
-            o[2] = (BYTE)(sr / span);
-            o[3] = 255;
-            int io = i - r;     if (io < 0)  io = 0;
-            int in = i + r + 1; if (in >= n) in = n - 1;
-            const BYTE* pa = s + (size_t)in * step;
-            const BYTE* pr = s + (size_t)io * step;
-            sb += pa[0] - pr[0];
-            sg += pa[1] - pr[1];
-            sr += pa[2] - pr[2];
-        }
+// GDI+ for every shape (it antialiases), GDI for text (it does ClearType).
+struct Gfx {
+    G::Graphics g;
+    explicit Gfx(HDC dc) : g(dc) {
+        g.SetSmoothingMode(G::SmoothingModeAntiAlias);
+        g.SetPixelOffsetMode(G::PixelOffsetModeHalf);
     }
+};
+
+static void RoundPath(G::GraphicsPath& p, float x, float y, float w, float h, float r) {
+    float d = r * 2;
+    p.AddArc(x, y, d, d, 180, 90);
+    p.AddArc(x + w - d, y, d, d, 270, 90);
+    p.AddArc(x + w - d, y + h - d, d, d, 0, 90);
+    p.AddArc(x, y + h - d, d, d, 90, 90);
+    p.CloseFigure();
 }
-
-// The blurred backdrop is built once per opening and reused for every frame of
-// the fade, so the animation stays cheap.
-static HDC     g_blurDc   = NULL;
-static HBITMAP g_blurBmp  = NULL;
-static BYTE*   g_blurBits = NULL;
-static BYTE*   g_blurTmp  = NULL;
-static int     g_blurW = 0, g_blurH = 0;
-static bool    g_blurValid = false;
-
-static void FreeBlur() {
-    if (g_blurDc)  { DeleteDC(g_blurDc);      g_blurDc = NULL; }
-    if (g_blurBmp) { DeleteObject(g_blurBmp); g_blurBmp = NULL; }
-    if (g_blurTmp) { free(g_blurTmp);         g_blurTmp = NULL; }
-    g_blurBits = NULL;
-    g_blurW = g_blurH = 0;
-    g_blurValid = false;
+static void FillRound(HDC dc, RECT rc, float r, COLORREF c, BYTE a = 255) {
+    Gfx x(dc);
+    G::GraphicsPath p;
+    RoundPath(p, (float)rc.left, (float)rc.top, (float)(rc.right - rc.left), (float)(rc.bottom - rc.top), r);
+    G::SolidBrush b(GC(c, a));
+    x.g.FillPath(&b, &p);
 }
-
-static const int  BLUR_RADIUS = 3;
-static const int  BLUR_PASSES = 3;
-static const int  BLUR_DIM    = 200;   // out of 255: a gentle darkening
-
-static void BuildBlur(HDC ref, HDC src, int w, int h) {
-    if (g_blurDc && (g_blurW != w || g_blurH != h)) FreeBlur();
-    if (!g_blurDc) {
-        g_blurDc  = CreateCompatibleDC(ref);
-        g_blurBmp = MakeDib(ref, w, h, &g_blurBits);
-        g_blurTmp = (BYTE*)malloc((size_t)w * h * 4);
-        if (!g_blurDc || !g_blurBmp || !g_blurBits || !g_blurTmp) { FreeBlur(); return; }
-        SelectObject(g_blurDc, g_blurBmp);
-        g_blurW = w; g_blurH = h;
-    }
-
-    BitBlt(g_blurDc, 0, 0, w, h, src, 0, 0, SRCCOPY);
-    GdiFlush();                                    // the DIB bits are stale until this
-
-    for (int p = 0; p < BLUR_PASSES; ++p) {
-        BlurAxis(g_blurBits, g_blurTmp,  w, h, 4,     w * 4, BLUR_RADIUS);
-        BlurAxis(g_blurTmp,  g_blurBits, h, w, w * 4, 4,     BLUR_RADIUS);
-    }
-
-    size_t n = (size_t)w * h * 4;
-    for (size_t i = 0; i < n; i += 4) {
-        g_blurBits[i]     = (BYTE)(g_blurBits[i]     * BLUR_DIM / 255);
-        g_blurBits[i + 1] = (BYTE)(g_blurBits[i + 1] * BLUR_DIM / 255);
-        g_blurBits[i + 2] = (BYTE)(g_blurBits[i + 2] * BLUR_DIM / 255);
-    }
-    g_blurValid = true;
+static void FrameRound(HDC dc, RECT rc, float r, COLORREF c) {
+    Gfx x(dc);
+    G::GraphicsPath p;
+    RoundPath(p, rc.left + 0.5f, rc.top + 0.5f, (float)(rc.right - rc.left) - 1, (float)(rc.bottom - rc.top) - 1, r);
+    G::Pen pen(GC(c), 1.0f);
+    x.g.DrawPath(&pen, &p);
 }
-
-// Lay `layer` over `dst` at the given opacity.
-static void BlendLayer(HDC dst, HDC layer, int w, int h, double amount) {
-    BYTE a = (BYTE)(amount * 255.0 + 0.5);
-    if (a == 0) return;
-    BLENDFUNCTION bf = { AC_SRC_OVER, 0, a, 0 };
-    AlphaBlend(dst, 0, 0, w, h, layer, 0, 0, w, h, bf);
+static void FillCircle(HDC dc, float cx, float cy, float r, COLORREF c, BYTE a = 255) {
+    Gfx x(dc);
+    G::SolidBrush b(GC(c, a));
+    x.g.FillEllipse(&b, cx - r, cy - r, r * 2, r * 2);
 }
-
-static void DrawButton(HDC dc, RECT rc, const wchar_t* text, COLORREF bg,
-                       COLORREF border, COLORREF txt, HFONT f) {
-    FillRound(dc, rc, 5, bg);
-    if (border != bg) FrameRound(dc, rc, 5, border);
-    Txt(dc, text, rc, txt, f, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-}
-
-static void DrawBadge(HDC dc, RECT rc, int state, int vk) {
-    COLORREF bg, bd, tx; const wchar_t* s; wchar_t key[48];
-    if (state == BIND_WAITING)      { bg = C_WAIT_BG;  bd = C_WAIT_BORDER;  tx = C_WAIT_TXT;  s = L"Press key…"; }
-    else if (state == BIND_BOUND)   { bg = C_BOUND_BG; bd = C_BOUND_BORDER; tx = C_ACCENT;    bm_DescribeKey(vk, key, 48); s = key; }
-    else                            { bg = C_BINDBG;   bd = C_BORDER;       tx = C_BADGE_TXT; s = L"Not set"; }
-    FillRound(dc, rc, 4, bg);
-    FrameRound(dc, rc, 4, bd);
-    Txt(dc, s, rc, tx, g_fSmall, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-}
-
-static void DrawCombo(HDC dc, RECT rc, const wchar_t* text, bool hot, bool enabled) {
-    FillRound(dc, rc, 5, enabled ? C_BAR : C_SEL_DISBG);
-    FrameRound(dc, rc, 5, enabled ? (hot ? C_ACCENT : C_BORDER) : C_CARDBORDER);
-    RECT t = rc; t.left += 9; t.right -= 26;
-    Txt(dc, text, t, enabled ? C_INPUT_TXT : C_SEL_DISTXT, g_fInput, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    RECT a = R(rc.right - 22, rc.top, rc.right - 6, rc.bottom);
-    Txt(dc, L"▾", a, enabled ? C_MUTED : C_SEL_DISTXT, g_fArrow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-}
-
-// While the gear panel is up the child EDIT controls are hidden, because Windows
-// would paint them sharply over our blurred backdrop. Their values are drawn
-// here instead, matching the controls' own right-aligned layout.
-static void DrawEditGhost(HDC dc, HWND edit, const RECT& rc, bool enabled) {
-    if (!g_editsHidden || !edit) return;
-
-    // The real control fills its box; without this the card colour showed
-    // through and every field read as grey until the controls came back.
-    RECT in = rc;
-    InflateRect(&in, -1, -1);
-    HBRUSH b = CreateSolidBrush(enabled ? C_BAR : C_SEL_DISBG);
-    FillRect(dc, &in, b);
+static void FillBox(HDC dc, RECT rc, COLORREF c) {
+    HBRUSH b = CreateSolidBrush(c);
+    FillRect(dc, &rc, b);
     DeleteObject(b);
-
-    wchar_t buf[32] = {};
-    GetWindowTextW(edit, buf, 32);
-    RECT t = rc;
-    t.left += 7;
-    t.right -= 9;
-    Txt(dc, buf, t, enabled ? C_INPUT_TXT : C_SEL_DISTXT, g_fInput,
-        DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 }
 
-static void PaintAll(HDC dc, RECT cr) {
+static void Txt(HDC dc, const wchar_t* s, RECT rc, COLORREF c, HFONT f, UINT fmt) {
+    HGDIOBJ of = SelectObject(dc, f);
+    SetBkMode(dc, TRANSPARENT); SetTextColor(dc, c);
+    DrawTextW(dc, s, -1, &rc, fmt | DT_NOPREFIX);
+    SelectObject(dc, of);
+}
+static int TextW(HFONT f, const wchar_t* s) {
+    HGDIOBJ of = SelectObject(g_measure, f);
+    SIZE sz; GetTextExtentPoint32W(g_measure, s, lstrlenW(s), &sz);
+    SelectObject(g_measure, of);
+    return sz.cx;
+}
+static int TextH(HFONT f, const wchar_t* s, int w) {
+    RECT rc = R(0, 0, w, 0);
+    HGDIOBJ of = SelectObject(g_measure, f);
+    DrawTextW(g_measure, s, -1, &rc, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
+    SelectObject(g_measure, of);
+    return rc.bottom;
+}
 
-    HBRUSH bg = CreateSolidBrush(C_BG); FillRect(dc, &cr, bg); DeleteObject(bg);
-
-    HBRUSH bar = CreateSolidBrush(C_BAR); FillRect(dc, &rcTitlebar, bar); DeleteObject(bar);
-    DrawLogoMark(dc, PAD_X, (TITLE_H - 22) / 2, 22);
-    {
-
-        HGDIOBJ of = SelectObject(dc, g_fTitle);
-        SetBkMode(dc, TRANSPARENT);
-        SIZE szL; GetTextExtentPoint32W(dc, L"Line", 4, &szL);
-        int tx = PAD_X + 22 + 8, ty = (TITLE_H - szL.cy) / 2;
-        SetTextColor(dc, C_LOGO_LINE); TextOutW(dc, tx, ty, L"Line", 4);
-        SetTextColor(dc, C_ACCENT);    TextOutW(dc, tx + szL.cx, ty, L"AC", 2);
-        SelectObject(dc, of);
+// wsprintfW has no float support, so numbers go through integer hundredths.
+static void FmtDec(double v, wchar_t* out, int maxDec) {
+    if (v < 0) v = 0;
+    if (maxDec == 1) {
+        int t = (int)(v * 10.0 + 0.5);
+        if (t % 10 == 0) wsprintfW(out, L"%d", t / 10);
+        else             wsprintfW(out, L"%d.%d", t / 10, t % 10);
+        return;
     }
-    FillCircle(dc, (rcMin.left + rcMin.right) / 2, (rcMin.top + rcMin.bottom) / 2, 7, C_DOT_MIN);
-    FillCircle(dc, (rcCls.left + rcCls.right) / 2, (rcCls.top + rcCls.bottom) / 2, 7, C_DOT_CLS);
+    int h = (int)(v * 100.0 + 0.5);
+    if (h % 100 == 0)     wsprintfW(out, L"%d", h / 100);
+    else if (h % 10 == 0) wsprintfW(out, L"%d.%d", h / 100, (h % 100) / 10);
+    else                  wsprintfW(out, L"%d.%02d", h / 100, h % 100);
+}
+static void FmtNum(const Num* n, wchar_t* out) {
+    if (n->unit == U_LIMIT && n->v <= 0.0) { lstrcpyW(out, L"off"); return; }
+    FmtDec(n->v, out, 2);
+    if (n->unit == U_MS)  lstrcatW(out, L" ms");
+    if (n->unit == U_PCT) lstrcatW(out, L"%");
+}
+static void SetNum(Num* n, double v) {
+    if (v < n->mn) v = n->mn;
+    if (v > n->mx) v = n->mx;
+    n->v = floor(v * 100.0 + 0.5) / 100.0;
+}
 
-    RECT cards[6] = { rcCardWindow, rcCardLMB, rcCardRMB, rcCardHighCps, rcCardSettings, rcCardBlockHit };
-    const wchar_t* heads[6] = { L"WINDOW", L"LEFT MOUSE BUTTON", L"RIGHT MOUSE BUTTON", L"HIGHCPS BUTTON", L"SETTINGS", L"BLOCKHIT" };
-    for (int i = 0; i < 6; ++i) {
-        FillRound(dc, cards[i], 7, C_CARD);
-        FrameRound(dc, cards[i], 7, C_CARDBORDER);
-        RECT h = R(cards[i].left + 14, cards[i].top + 6, cards[i].right - 14, cards[i].top + 6 + 13);
-        Txt(dc, heads[i], h, C_MUTED, g_fHead, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    }
-    if (g_customVisible) {
-        FillRound(dc, rcCardCustom, 7, C_CARD);
-        FrameRound(dc, rcCardCustom, 7, C_CARDBORDER);
-        RECT h = R(rcCardCustom.left + 14, rcCardCustom.top + 6, rcCardCustom.right - 14, rcCardCustom.top + 6 + 13);
-        Txt(dc, L"CUSTOM PATTERN", h, C_MUTED, g_fHead, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    }
-    if (g_blatantVisible) {
-        FillRound(dc, rcCardLimited, 7, C_CARD);
-        FrameRound(dc, rcCardLimited, 7, C_CARDBORDER);
-        RECT h = R(rcCardLimited.left + 14, rcCardLimited.top + 6, rcCardLimited.right - 14, rcCardLimited.top + 6 + 13);
-        Txt(dc, L"LIMITED CPS", h, C_MUTED, g_fHead, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    }
+// ---- icons ----------------------------------------------------------------
+// Lucide outlines, kept as their SVG path data and parsed once into GDI+
+// paths, so they render exactly like the prototype at any size.
 
-    HPEN sep = CreatePen(PS_SOLID, 1, C_SEP);
-    HGDIOBJ osep = SelectObject(dc, sep);
+enum { IC_POWER, IC_CROSSHAIR, IC_LINK, IC_REPEAT, IC_ACTIVITY, IC_ZAP, IC_CLOCK,
+       IC_TARGET, IC_APPWIN, IC_TERMINAL, IC_GEAR, IC_SHIELD, IC_PAUSE, IC_TIMER,
+       IC_WAVES, IC_MOVE, IC_CAP, IC_LAYERS, IC_MINUS, IC_X, IC_COUNT };
 
-    int wsep = rcCardWindow.top + HEAD_H + ROW_H;
-    MoveToEx(dc, rcCardWindow.left + 14, wsep, NULL); LineTo(dc, rcCardWindow.right - 14, wsep);
+static const char* ICON_SVG[IC_COUNT] = {
+    "M12 2v10M18.4 6.6a9 9 0 1 1-12.77.04",
+    "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M22 12h-4M6 12H2M12 6V2M12 22v-4",
+    "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"
+    "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71",
+    "M17 2l4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3",
+    "M22 12h-4l-3 9L9 3l-3 9H2",
+    "M13 2 3 14h9l-1 8 10-12h-9l1-8z",
+    "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M12 6v6l4 2",
+    "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0M6 12a6 6 0 1 0 12 0a6 6 0 1 0-12 0"
+    "M10 12a2 2 0 1 0 4 0a2 2 0 1 0-4 0",
+    "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM10 4v4M2 8h20M6 4v4",
+    "M4 17l6-6-6-6M12 19h8",
+    "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73"
+    "l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73"
+    "l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44"
+    "a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39"
+    "a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73"
+    "l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+    "M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
+    "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+    "M15 4h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
+    "M7 4h2a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z",
+    "M10 2h4M12 14l3-3M4 14a8 8 0 1 0 16 0a8 8 0 1 0-16 0",
+    "M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"
+    "M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"
+    "M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1",
+    "M18 8l4 4-4 4M2 12h20M6 8l-4 4 4 4",
+    "M5 3h14M18 13l-6-6-6 6M12 7v14",
+    "M12 2l10 5-10 5L2 7zM2 17l10 5 10-5M2 12l10 5 10-5",
+    "M5 12h14",
+    "M18 6 6 18M6 6l12 12",
+};
+static G::GraphicsPath* g_icons[IC_COUNT];
 
-    int ssep = rcCardSettings.top + HEAD_H + ROW_H;
-    MoveToEx(dc, rcCardSettings.left + 14, ssep, NULL); LineTo(dc, rcCardSettings.right - 14, ssep);
+static void ArcTo(G::GraphicsPath& p, float x1, float y1, float rx, float ry,
+                  bool large, bool sweep, float x2, float y2) {
+    const double PI = 3.14159265358979;
+    rx = fabsf(rx); ry = fabsf(ry);
+    if (rx == 0 || ry == 0) { p.AddLine(x1, y1, x2, y2); return; }
+    double xp = (x1 - x2) / 2.0, yp = (y1 - y2) / 2.0;
+    double lam = xp * xp / (rx * rx) + yp * yp / (ry * ry);
+    if (lam > 1) { rx *= (float)sqrt(lam); ry *= (float)sqrt(lam); }
+    double num = (double)rx * rx * ry * ry - (double)rx * rx * yp * yp - (double)ry * ry * xp * xp;
+    double den = (double)rx * rx * yp * yp + (double)ry * ry * xp * xp;
+    double co = den > 0 ? sqrt(num / den > 0 ? num / den : 0) : 0;
+    if (large == sweep) co = -co;
+    double cxp = co * rx * yp / ry, cyp = -co * ry * xp / rx;
+    double cx = cxp + (x1 + x2) / 2.0, cy = cyp + (y1 + y2) / 2.0;
+    double t1 = atan2((yp - cyp) / ry, (xp - cxp) / rx);
+    double t2 = atan2((-yp - cyp) / ry, (-xp - cxp) / rx);
+    double dt = t2 - t1;
+    if (!sweep && dt > 0) dt -= 2 * PI;
+    if (sweep && dt < 0)  dt += 2 * PI;
+    p.AddArc((float)(cx - rx), (float)(cy - ry), rx * 2, ry * 2,
+             (float)(t1 * 180 / PI), (float)(dt * 180 / PI));
+}
 
-    int bsep = rcCardBlockHit.top + HEAD_H + ROW_H;
-    MoveToEx(dc, rcCardBlockHit.left + 14, bsep, NULL); LineTo(dc, rcCardBlockHit.right - 14, bsep);
-    int bsep2 = rcCardBlockHit.top + HEAD_H + 2 * ROW_H;
-    MoveToEx(dc, rcCardBlockHit.left + 14, bsep2, NULL); LineTo(dc, rcCardBlockHit.right - 14, bsep2);
-    int bsep3 = rcCardBlockHit.top + HEAD_H + 3 * ROW_H;
-    MoveToEx(dc, rcCardBlockHit.left + 14, bsep3, NULL); LineTo(dc, rcCardBlockHit.right - 14, bsep3);
-
-    int hsep = rcCardHighCps.top + HEAD_H + ROW_H;
-    MoveToEx(dc, rcCardHighCps.left + 14, hsep, NULL); LineTo(dc, rcCardHighCps.right - 14, hsep);
-
-    if (g_customVisible) {
-        int cs1 = rcCardCustom.top + HEAD_H + ROW_H;
-        int cs2 = rcCardCustom.top + HEAD_H + 2 * ROW_H;
-        MoveToEx(dc, rcCardCustom.left + 14, cs1, NULL); LineTo(dc, rcCardCustom.right - 14, cs1);
-        MoveToEx(dc, rcCardCustom.left + 14, cs2, NULL); LineTo(dc, rcCardCustom.right - 14, cs2);
-    }
-    SelectObject(dc, osep); DeleteObject(sep);
-
-    RECT lblAllow = R(rcCardWindow.left + 14, rcCardWindow.top + HEAD_H,
-                      rcToggle.left - 8, rcCardWindow.top + HEAD_H + ROW_H);
-    Txt(dc, L"Allow in all programs", lblAllow, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-    DrawToggle(dc, rcToggle, g_aAllow.cur);
-
-    bool selOn = !g_allowAll;
-    DrawButton(dc, rcSel, L"Select window",
-               selOn ? (g_hot == EL_SEL ? C_BINDBG_HOVER : C_BINDBG) : C_SEL_DISBG,
-               selOn ? C_BORDER : C_CARDBORDER,
-               selOn ? C_LABEL : C_SEL_DISTXT, g_fInput);
-
-    wchar_t wl[160];
-    if (g_allowAll) wl[0] = 0;
-    else if (g_targetCount == 0) lstrcpynW(wl, L"All windows (none selected)", 160);
-    else if (g_targetCount == 1 && IsWindow(g_targets[0])) ws_GetTitle(g_targets[0], wl, 160);
-    else wsprintfW(wl, L"%d windows selected", g_targetCount);
-    Txt(dc, wl, rcWinLbl, C_MUTED, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-    RECT lblL = R(rcCardLMB.left + 14, rcCardLMB.top + HEAD_H, rcInpL.left - 8, rcCardLMB.top + HEAD_H + ROW_H);
-    Txt(dc, L"CPS", lblL, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    FrameRound(dc, rcInpL, 5, C_BORDER);
-    DrawEditGhost(dc, g_hEditL, rcInpL, true);
-    DrawButton(dc, rcBindL, L"Set bind", g_hot == EL_BINDL ? C_BINDBG_HOVER : C_BINDBG, C_BORDER, C_BIND_TXT, g_fSmall);
-    DrawBadge(dc, rcBadgeL, g_bindLState, g_bindL);
-
-    RECT lblR = R(rcCardRMB.left + 14, rcCardRMB.top + HEAD_H, rcInpR.left - 8, rcCardRMB.top + HEAD_H + ROW_H);
-    Txt(dc, L"CPS", lblR, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    FrameRound(dc, rcInpR, 5, C_BORDER);
-    DrawEditGhost(dc, g_hEditR, rcInpR, true);
-    DrawButton(dc, rcBindR, L"Set bind", g_hot == EL_BINDR ? C_BINDBG_HOVER : C_BINDBG, C_BORDER, C_BIND_TXT, g_fSmall);
-    DrawBadge(dc, rcBadgeR, g_bindRState, g_bindR);
-
-    RECT lblP = R(rcCardSettings.left + 14, rcCardSettings.top + HEAD_H, rcPattern.left - 8, rcCardSettings.top + HEAD_H + ROW_H);
-    Txt(dc, L"Click pattern", lblP, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawCombo(dc, rcPattern, PATTERN_ITEMS[g_patternSel], g_openCombo == EL_PATTERN, true);
-    RECT lblM = R(rcCardSettings.left + 14, rcMode.top - (ROW_H - 27) / 2, rcMode.left - 8, rcMode.top - (ROW_H - 27) / 2 + ROW_H);
-    Txt(dc, L"Mode", lblM, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawCombo(dc, rcMode, MODE_ITEMS[g_modeSel], g_openCombo == EL_MODE, true);
-
-    if (g_customVisible) {
-        const wchar_t* clbl[3] = { L"Click Duration (ms)", L"Difference Chance (%)", L"Difference Strength (%)" };
-        RECT crc[3] = { rcInpDuration, rcInpChance, rcInpStrength };
-        HWND cedit[3] = { g_hEditDuration, g_hEditChance, g_hEditStrength };
-        for (int i = 0; i < 3; ++i) {
-            RECT lbl = R(rcCardCustom.left + 14, crc[i].top - (ROW_H - 27) / 2,
-                         crc[i].left - 8, crc[i].top - (ROW_H - 27) / 2 + ROW_H);
-            Txt(dc, clbl[i], lbl, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-            FrameRound(dc, crc[i], 5, C_BORDER);
-            DrawEditGhost(dc, cedit[i], crc[i], true);
+// Enough of the SVG path grammar for Lucide: M L H V C S A Z, both cases,
+// implicit repeats and packed numbers like "1.5.5" or "2-1.73".
+static void ParsePath(G::GraphicsPath& p, const char* s) {
+    float cx = 0, cy = 0, sx = 0, sy = 0, lcx = 0, lcy = 0;
+    char cmd = 0, prev = 0;
+    auto skip = [&]() { while (*s == ' ' || *s == ',') ++s; };
+    auto num  = [&](float& out) -> bool {
+        skip(); char* e; out = strtof(s, &e);
+        if (e == s) return false;
+        s = e; return true;
+    };
+    for (;;) {
+        skip();
+        if (!*s) break;
+        if ((*s >= 'A' && *s <= 'Z') || (*s >= 'a' && *s <= 'z')) cmd = *s++;
+        else if (!cmd) break;
+        bool rel = (cmd >= 'a');
+        char up = rel ? (char)(cmd - 32) : cmd;
+        float a[7];
+        switch (up) {
+        case 'M':
+            if (!num(a[0]) || !num(a[1])) return;
+            if (rel) { a[0] += cx; a[1] += cy; }
+            p.StartFigure();
+            cx = sx = a[0]; cy = sy = a[1];
+            cmd = rel ? 'l' : 'L';
+            break;
+        case 'L':
+            if (!num(a[0]) || !num(a[1])) return;
+            if (rel) { a[0] += cx; a[1] += cy; }
+            p.AddLine(cx, cy, a[0], a[1]); cx = a[0]; cy = a[1];
+            break;
+        case 'H':
+            if (!num(a[0])) return;
+            if (rel) a[0] += cx;
+            p.AddLine(cx, cy, a[0], cy); cx = a[0];
+            break;
+        case 'V':
+            if (!num(a[0])) return;
+            if (rel) a[0] += cy;
+            p.AddLine(cx, cy, cx, a[0]); cy = a[0];
+            break;
+        case 'C':
+            for (int i = 0; i < 6; ++i) if (!num(a[i])) return;
+            if (rel) for (int i = 0; i < 6; i += 2) { a[i] += cx; a[i + 1] += cy; }
+            p.AddBezier(cx, cy, a[0], a[1], a[2], a[3], a[4], a[5]);
+            lcx = a[2]; lcy = a[3]; cx = a[4]; cy = a[5];
+            break;
+        case 'S': {
+            for (int i = 0; i < 4; ++i) if (!num(a[i])) return;
+            if (rel) for (int i = 0; i < 4; i += 2) { a[i] += cx; a[i + 1] += cy; }
+            float c1x = cx, c1y = cy;
+            if (prev == 'C' || prev == 'S') { c1x = 2 * cx - lcx; c1y = 2 * cy - lcy; }
+            p.AddBezier(cx, cy, c1x, c1y, a[0], a[1], a[2], a[3]);
+            lcx = a[0]; lcy = a[1]; cx = a[2]; cy = a[3];
+            break;
         }
-    }
-
-    if (g_blatantVisible) {
-        RECT lblLim = R(rcCardLimited.left + 14, rcInpLimited.top - (ROW_H - 27) / 2,
-                        rcInpLimited.left - 8, rcInpLimited.top - (ROW_H - 27) / 2 + ROW_H);
-        Txt(dc, L"Max CPS limit", lblLim, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        FrameRound(dc, rcInpLimited, 5, C_BORDER);
-        DrawEditGhost(dc, g_hEditLimited, rcInpLimited, true);
-    }
-
-    RECT lblBH = R(rcCardBlockHit.left + 14, rcCardBlockHit.top + HEAD_H,
-                   rcBlockToggle.left - 8, rcCardBlockHit.top + HEAD_H + ROW_H);
-    Txt(dc, L"Enable BlockHit", lblBH, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawToggle(dc, rcBlockToggle, g_aBlock.cur);
-    RECT lblBPS = R(rcCardBlockHit.left + 14, rcInpBPS.top - (ROW_H - 27) / 2,
-                    rcInpBPS.left - 8, rcInpBPS.top - (ROW_H - 27) / 2 + ROW_H);
-    Txt(dc, L"BPS (hold RMB)", lblBPS, g_blockHit ? C_LABEL : C_SEL_DISTXT, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    FrameRound(dc, rcInpBPS, 5, g_blockHit ? C_BORDER : C_CARDBORDER);
-    DrawEditGhost(dc, g_hEditBPS, rcInpBPS, g_blockHit);
-
-    RECT lblBP = R(rcCardBlockHit.left + 14, rcBlockPauseBindBtn.top - (ROW_H - 25) / 2,
-                   rcBlockPauseBindBtn.left - 8, rcBlockPauseBindBtn.top - (ROW_H - 25) / 2 + ROW_H);
-    Txt(dc, L"Pause bind", lblBP, g_blockHit ? C_LABEL : C_SEL_DISTXT, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    if (g_blockHit) {
-        DrawButton(dc, rcBlockPauseBindBtn, L"Set bind",
-                   g_hot == EL_BINDBLOCKPAUSE ? C_BINDBG_HOVER : C_BINDBG, C_BORDER, C_BIND_TXT, g_fSmall);
-        DrawBadge(dc, rcBlockPauseBadge, g_bindBlockPauseState, g_bindBlockPause);
-    } else {
-        DrawButton(dc, rcBlockPauseBindBtn, L"Set bind", C_SEL_DISBG, C_CARDBORDER, C_SEL_DISTXT, g_fSmall);
-        wchar_t key[48]; const wchar_t* bs = L"Not set";
-        if (g_bindBlockPause) { bm_DescribeKey(g_bindBlockPause, key, 48); bs = key; }
-        FillRound(dc, rcBlockPauseBadge, 4, C_SEL_DISBG);
-        FrameRound(dc, rcBlockPauseBadge, 4, C_CARDBORDER);
-        Txt(dc, bs, rcBlockPauseBadge, C_SEL_DISTXT, g_fSmall, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    }
-
-    RECT lblPM = R(rcCardBlockHit.left + 14, rcBlockPauseMode.top - (ROW_H - 27) / 2,
-                   rcBlockPauseMode.left - 8, rcBlockPauseMode.top - (ROW_H - 27) / 2 + ROW_H);
-    Txt(dc, L"Pause mode", lblPM, g_blockHit ? C_LABEL : C_SEL_DISTXT, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawCombo(dc, rcBlockPauseMode, PAUSEMODE_ITEMS[g_blockPauseModeSel], g_openCombo == EL_BLOCKPAUSEMODE, g_blockHit);
-
-    RECT lblHC = R(rcCardHighCps.left + 14, rcCardHighCps.top + HEAD_H,
-                   rcHighCpsToggle.left - 8, rcCardHighCps.top + HEAD_H + ROW_H);
-    Txt(dc, L"Enable HighCPS", lblHC, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawToggle(dc, rcHighCpsToggle, g_aHigh.cur);
-    RECT lblHCcps = R(rcCardHighCps.left + 14, rcInpHighCps.top - (ROW_H - 27) / 2,
-                      rcInpHighCps.left - 8, rcInpHighCps.top - (ROW_H - 27) / 2 + ROW_H);
-    Txt(dc, L"CPS", lblHCcps, g_highCps ? C_LABEL : C_SEL_DISTXT, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    FrameRound(dc, rcInpHighCps, 5, g_highCps ? C_BORDER : C_CARDBORDER);
-    DrawEditGhost(dc, g_hEditHighCps, rcInpHighCps, g_highCps);
-    if (g_highCps) {
-        DrawButton(dc, rcBindHighCps, L"Set bind",
-                   g_hot == EL_BINDHIGHCPS ? C_BINDBG_HOVER : C_BINDBG, C_BORDER, C_BIND_TXT, g_fSmall);
-        DrawBadge(dc, rcBadgeHighCps, g_bindHighCpsState, g_bindHighCps);
-    } else {
-
-        DrawButton(dc, rcBindHighCps, L"Set bind", C_SEL_DISBG, C_CARDBORDER, C_SEL_DISTXT, g_fSmall);
-        wchar_t key[48]; const wchar_t* bs = L"Not set";
-        if (g_bindHighCps) { bm_DescribeKey(g_bindHighCps, key, 48); bs = key; }
-        FillRound(dc, rcBadgeHighCps, 4, C_SEL_DISBG);
-        FrameRound(dc, rcBadgeHighCps, 4, C_CARDBORDER);
-        Txt(dc, bs, rcBadgeHighCps, C_SEL_DISTXT, g_fSmall, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    }
-
-    DrawButton(dc, rcApply, L"Apply", g_hot == EL_APPLY ? C_ACCENT_HOVER : C_ACCENT, C_ACCENT, RGB(255,255,255), g_fApply);
-
-    HBRUSH sb = CreateSolidBrush(C_BAR); FillRect(dc, &rcStatusBar, sb); DeleteObject(sb);
-    // The nick sits where the status text used to; the dot and the nick colour
-    // still carry running / applied state, so no feedback is lost.
-    bool running = ae_IsActiveNow();
-    bool dotOn   = running || GetTickCount() < g_flashUntil;
-    FillCircle(dc, PAD_X + 3, rcStatusBar.top + STATUS_H / 2, 3, dotOn ? C_ACCENT : C_DOT_OFF);
-    RECT stt = R(PAD_X + 11, rcStatusBar.top, WIN_W - 40, rcStatusBar.bottom);
-    Txt(dc, L"@slurov", stt, dotOn ? C_STAT_RUN : C_MUTED, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-
-    DrawGear(dc, (rcGear.left + rcGear.right) / 2, (rcGear.top + rcGear.bottom) / 2,
-             (g_hot == EL_GEAR || g_gearOpen) ? C_ACCENT : C_DOT_OFF);
-
-    if (g_limitedTip && g_blatantVisible) {
-        const wchar_t* tip =
-            L"Advice: Turn on this module to get cps targeted cps super fast "
-            L"if the server doesn't have ac checks to avoid bans and logs";
-        const int pad = 9;
-        int boxW = WIN_W - 2 * PAD_X;
-
-        RECT calc = R(0, 0, boxW - 2 * pad, 0);
-        HGDIOBJ of = SelectObject(dc, g_fSmall);
-        DrawTextW(dc, tip, -1, &calc, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
-        SelectObject(dc, of);
-        int boxH = (calc.bottom - calc.top) + 2 * pad;
-        RECT tp = R(PAD_X, rcCardLimited.bottom + 4, PAD_X + boxW, rcCardLimited.bottom + 4 + boxH);
-        FillRound(dc, tp, 6, C_BAR);
-        FrameRound(dc, tp, 6, C_ACCENT);
-        RECT ti = R(tp.left + pad, tp.top + pad, tp.right - pad, tp.bottom - pad);
-        Txt(dc, tip, ti, C_POPUP_TXT1, g_fSmall, DT_LEFT | DT_TOP | DT_WORDBREAK);
-    }
-
-    if (g_openCombo) {
-        RECT base = comboRectOf(g_openCombo);
-        const wchar_t** items = comboItemsOf(g_openCombo);
-        int curSel = *comboSelOf(g_openCombo);
-        int n = comboCount(g_openCombo);
-        RECT panel = R(base.left, base.bottom + 4, base.right, base.bottom + 4 + n * ITEM_H);
-        FillRound(dc, panel, 5, C_BAR);
-        FrameRound(dc, panel, 5, C_BORDER);
-        for (int i = 0; i < n; ++i) {
-            RECT it = comboItem(base, i);
-            if (i == g_comboHot) {
-                RECT hl = it; InflateRect(&hl, -3, 0);
-                FillRound(dc, hl, 4, RGB(0x23,0x29,0x3a));
-            }
-            RECT tt2 = it; tt2.left += 9;
-            Txt(dc, items[i], tt2, (i == curSel) ? C_ACCENT : C_INPUT_TXT, g_fInput,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        case 'A':
+            for (int i = 0; i < 7; ++i) if (!num(a[i])) return;
+            if (rel) { a[5] += cx; a[6] += cy; }
+            ArcTo(p, cx, cy, a[0], a[1], a[3] != 0, a[4] != 0, a[5], a[6]);
+            cx = a[5]; cy = a[6];
+            break;
+        case 'Z':
+            p.CloseFigure(); cx = sx; cy = sy;
+            break;
+        default:
+            return;
         }
+        prev = up;
     }
 }
 
-// Drawn after the backdrop has been blurred, so it stays sharp on top of it.
-static void PaintGearPanel(HDC dc) {
-    RECT pp = gearPopupRect();
-    FillRound(dc, pp, 6, C_CARD);
-    FrameRound(dc, pp, 6, C_CARDBORDER);
+static void DrawIcon(HDC dc, int icon, float x, float y, float size, COLORREF c) {
+    Gfx gx(dc);
+    gx.g.TranslateTransform(x, y);
+    gx.g.ScaleTransform(size / 24.0f, size / 24.0f);
+    G::Pen pen(GC(c), 1.7f);
+    pen.SetLineCap(G::LineCapRound, G::LineCapRound, G::DashCapRound);
+    pen.SetLineJoin(G::LineJoinRound);
+    gx.g.DrawPath(&pen, g_icons[icon]);
+}
 
-    RECT hd = R(pp.left + 13, pp.top + GP_PAD, pp.right - 13, pp.top + GP_PAD + GP_HEAD_H);
+// The LineAC mark: an "L" stroke ending in a click node with a faint ripple.
+static void DrawMark(HDC dc, float x, float y, float size) {
+    Gfx gx(dc);
+    gx.g.TranslateTransform(x, y);
+    gx.g.ScaleTransform(size / 96.0f, size / 96.0f);
+    G::Pen ring(GC(C_ACCENT, 90), 4.0f);
+    gx.g.DrawEllipse(&ring, 47.0f, 43.0f, 30.0f, 30.0f);
+    G::Pen line(GC(C_ACCENT), 11.0f);
+    line.SetLineCap(G::LineCapRound, G::LineCapRound, G::DashCapRound);
+    line.SetLineJoin(G::LineJoinRound);
+    G::PointF pts[3] = { G::PointF(30, 22), G::PointF(30, 58), G::PointF(62, 58) };
+    gx.g.DrawLines(&line, pts, 3);
+    G::SolidBrush node(GC(C_ACCENT));
+    gx.g.FillEllipse(&node, 54.0f, 50.0f, 16.0f, 16.0f);
+}
+
+// ---- page model -----------------------------------------------------------
+// Each page is a list of items. One build pass lays them out; painting and
+// hit-testing both read the same rects, so they can never disagree.
+enum { K_HEAD, K_TOGGLE, K_SLIDER, K_BIND, K_SEG, K_LINK, K_NOTE, K_CHIPS };
+enum { TG_ALLOW, TG_HIGH, TG_BLOCK, TG_CONSOLE };
+enum { PT_NONE, PT_TOGGLE, PT_MINUS, PT_PLUS, PT_VALUE, PT_BAR, PT_BIND, PT_LINK, PT_SEG0 };
+
+struct Item {
+    int kind, icon;
+    const wchar_t* label;
+    RECT rc;
+    bool hasToggle; int toggle; // K_TOGGLE, or a K_HEAD with a switch on its right
+    Num* num;                   // K_SLIDER
+    int* sel; const wchar_t** opts; int nopts;   // K_SEG
+    int* vk;                    // K_BIND
+    wchar_t text[400];          // K_NOTE / K_LINK
+};
+
+#define MAX_ITEMS 32
+static Item g_items[MAX_ITEMS];
+static int  g_nItems = 0;
+static Item g_sheet[MAX_ITEMS];
+static int  g_nSheet = 0;
+
+// Vertical dividers between the columns of the current page.
+static int g_div[2];
+static int g_nDiv = 0;
+
+#define MAX_CHIPS 12
+static wchar_t g_chipText[MAX_CHIPS][96];
+static RECT    g_chipRc[MAX_CHIPS];
+static int     g_nChips = 0;
+static wchar_t g_chipMore[64];
+static RECT    g_chipMoreRc;
+
+static bool* toggleFlag(int t) {
+    switch (t) {
+    case TG_ALLOW: return &g_allowAll;
+    case TG_HIGH:  return &g_highCps;
+    case TG_BLOCK: return &g_blockHit;
+    default:       return &g_showConsole;
+    }
+}
+static Anim* toggleAnim(int t) {
+    switch (t) {
+    case TG_ALLOW: return &g_aAllow;
+    case TG_HIGH:  return &g_aHigh;
+    case TG_BLOCK: return &g_aBlock;
+    default:       return &g_aConsole;
+    }
+}
+
+static Item* Push(Item* list, int& n, int kind, int icon, const wchar_t* label, int x0, int x1, int& y, int h) {
+    Item& it = list[n++];
+    ZeroMemory(&it, sizeof(it));
+    it.kind = kind; it.icon = icon; it.label = label;
+    it.rc = R(x0, y, x1, y + h);
+    y += h;
+    return &it;
+}
+
+// The builders below place items into the current list (page or sheet), in the
+// current column [g_x0, g_x1].
+static Item* g_list  = g_items;
+static int*  g_count = &g_nItems;
+static int g_x0 = PAD_X, g_x1 = WIN_W - PAD_X;
+static void Col(int x0, int x1) { g_x0 = x0; g_x1 = x1; }
+
+#define HEAD_H 40
+
+static void AddHead(int& y, int icon, const wchar_t* l, int toggle = -1) {
+    Item* it = Push(g_list, *g_count, K_HEAD, icon, l, g_x0, g_x1, y, HEAD_H);
+    if (toggle >= 0) { it->hasToggle = true; it->toggle = toggle; }
+}
+static void AddToggle(int& y, int icon, const wchar_t* l, int t) {
+    Item* it = Push(g_list, *g_count, K_TOGGLE, icon, l, g_x0, g_x1, y, ROW_H);
+    it->hasToggle = true; it->toggle = t;
+}
+static void AddSlider(int& y, int icon, const wchar_t* l, Num* n) {
+    Push(g_list, *g_count, K_SLIDER, icon, l, g_x0, g_x1, y, ROW_H + BAR_H)->num = n;
+    y += 4;
+}
+static void AddBind(int& y, int icon, const wchar_t* l, int* vk) {
+    Push(g_list, *g_count, K_BIND, icon, l, g_x0, g_x1, y, ROW_H)->vk = vk;
+}
+static void AddSeg(int& y, int icon, const wchar_t* l, const wchar_t** opts, int n, int* sel) {
+    Item* it = Push(g_list, *g_count, K_SEG, icon, l, g_x0, g_x1, y, ROW_H);
+    it->opts = opts; it->nopts = n; it->sel = sel;
+}
+static void AddNote(int& y, const wchar_t* text, int indent) {
+    int w = g_x1 - g_x0 - indent;
+    int h = TextH(g_fSmall, text, w) + 10;
+    Item* it = Push(g_list, *g_count, K_NOTE, 0, NULL, g_x0 + indent, g_x1, y, h);
+    lstrcpynW(it->text, text, 400);
+}
+
+static void BuildChips(int& y) {
+    int x0 = g_x0 + IND, x1 = g_x1;
+    Item* it = Push(g_list, *g_count, K_CHIPS, 0, NULL, x0, x1, y, 0);
+    g_nChips = 0; g_chipMore[0] = 0;
+    int x = x0, cy = y + 4, rows = 1, shown = 0;
+    for (int i = 0; i < g_targetCount && g_nChips < MAX_CHIPS; ++i) {
+        if (!IsWindow(g_targets[i])) continue;
+        wchar_t t[96]; ws_GetTitle(g_targets[i], t, 96);
+        int w = TextW(g_fSmall, t) + 18;
+        if (w > x1 - x0) w = x1 - x0;
+        if (x + w > x1 && x > x0) {
+            if (rows == 5) break;
+            rows++; x = x0; cy += 28;
+        }
+        lstrcpynW(g_chipText[g_nChips], t, 96);
+        g_chipRc[g_nChips] = R(x, cy, x + w, cy + 22);
+        g_nChips++; shown++;
+        x += w + 6;
+    }
+    int rest = g_targetCount - shown;
+    if (rest > 0) {
+        wsprintfW(g_chipMore, L"+%d more", rest);
+        int w = TextW(g_fSmall, g_chipMore) + 4;
+        if (x + w > x1) { x = x0; cy += 28; }
+        g_chipMoreRc = R(x, cy, x + w, cy + 22);
+    }
+    if (g_targetCount == 0) {
+        lstrcpyW(g_chipMore, L"None selected \x2014 clicks go to every window.");
+        g_chipMoreRc = R(x0, cy, x1, cy + 22);
+    }
+    int h = (cy + 22 + 6) - y;
+    it->rc.bottom = y + h;
+    y += h;
+}
+
+static const wchar_t* PatternNote() {
+    switch (g_patternSel) {
+    case PATTERN_LEGIT:
+        return L"Legit spaces clicks irregularly so the rhythm isn't machine-perfect.";
+    case PATTERN_BLATANT:
+        return L"Blatant keeps jitter minimal: the fastest, most consistent pattern. The "
+               L"limit bursts on activation, then holds the cap (0 = off). Use it only on "
+               L"servers without anticheat checks to avoid bans and logs.";
+    default:
+        return L"Custom sets how long each click is held, and how often and how far the "
+               L"delay is allowed to drift.";
+    }
+}
+
+static int g_sheetDiv = 0;      // x of the divider between the sheet's columns
+static int g_creditsY = 0;      // where the credits start in the sheet
+
+static void Rebuild() {
+    g_nItems = 0;
+    g_nDiv = 0;
+    g_list = g_items; g_count = &g_nItems;
+    int inner = WIN_W - 2 * PAD_X;
+    int w  = (inner - COL_GAP) / 2;
+    int xl = PAD_X, xr = PAD_X + w + COL_GAP;
+    g_div[0] = xr - COL_GAP / 2; g_nDiv = 1;
+
+    switch (g_page) {
+    case 0: {
+        // Left and Right Click stacked in the left half, HighCPS on the right.
+        int y = BODY_TOP;
+        Col(xl, xl + w);
+        AddHead(y, IC_CROSSHAIR, L"Left Click");
+        AddSlider(y, IC_ZAP, L"CPS", &nL);
+        AddBind(y, IC_LINK, L"Bind", &g_bindL);
+        y += 16;
+        AddHead(y, IC_CROSSHAIR, L"Right Click");
+        AddSlider(y, IC_ZAP, L"CPS", &nR);
+        AddBind(y, IC_LINK, L"Bind", &g_bindR);
+
+        int ry = BODY_TOP;
+        Col(xr, xr + w);
+        AddHead(ry, IC_LAYERS, L"HighCPS", TG_HIGH);
+        AddSlider(ry, IC_ZAP, L"CPS", &nHigh);
+        AddBind(ry, IC_LINK, L"Bind", &g_bindHighCps);
+        AddNote(ry, L"A second left-click channel on its own timer; its rate adds to "
+                    L"Left Click.", IND);
+        ry += 6;
+        AddNote(ry, L"Left and Right Click are active once they have a bind. Mode and "
+                    L"pattern are shared by every channel \x2014 set them on the "
+                    L"Pattern & BlockHit tab.", IND);
+        break;
+    }
+    case 1: {
+        // Pattern on the left, BlockHit in its own column on the right.
+        int y = BODY_TOP;
+        Col(xl, xl + w);
+        AddHead(y, IC_ACTIVITY, L"Pattern");
+        AddSeg(y, IC_REPEAT, L"Mode", MODE_ITEMS, 2, &g_modeSel);
+        AddSeg(y, IC_WAVES, L"Pattern", PATTERN_ITEMS, 3, &g_patternSel);
+        y += 4;
+        if (g_patternSel == PATTERN_BLATANT)
+            AddSlider(y, IC_CAP, L"Max CPS limit", &nLimit);
+        if (g_patternSel == PATTERN_CUSTOM) {
+            AddSlider(y, IC_TIMER, L"Click duration", &nDur);
+            AddSlider(y, IC_WAVES, L"Difference chance", &nChance);
+            AddSlider(y, IC_MOVE, L"Difference strength", &nStr);
+        }
+        wchar_t note[400];
+        lstrcpyW(note, g_modeSel == 0 ? L"Hold clicks while the bind is down. "
+                                      : L"Toggle: one press starts, the next stops. ");
+        lstrcatW(note, PatternNote());
+        AddNote(y, note, IND);
+
+        int ry = BODY_TOP;
+        Col(xr, xr + w);
+        AddHead(ry, IC_SHIELD, L"BlockHit", TG_BLOCK);
+        AddSlider(ry, IC_ZAP, L"BPS", &nBps);
+        AddBind(ry, IC_PAUSE, L"Pause bind", &g_bindBlockPause);
+        AddSeg(ry, IC_REPEAT, L"Pause mode", MODE_ITEMS, 2, &g_blockPauseModeSel);
+        AddNote(ry, L"Fires RMB while you physically hold the right mouse button.", IND);
+        break;
+    }
+    }
+
+    // The settings sheet: general settings and credits on the left, window
+    // targeting on the right.
+    g_nSheet = 0;
+    g_list = g_sheet; g_count = &g_nSheet;
+    g_sheetDiv = g_div[0];
+
+    int sy = HDR_H + 36;
+    Col(xl, xl + w);
+    AddHead(sy, IC_GEAR, L"General");
+    AddToggle(sy, IC_TERMINAL, L"Show Console", TG_CONSOLE);
+    g_creditsY = sy + 14;
+
+    sy = HDR_H + 36;
+    Col(xr, xr + w);
+    AddHead(sy, IC_TARGET, L"Targeting");
+    AddToggle(sy, IC_APPWIN, L"Allow in all programs", TG_ALLOW);
+    if (g_allowAll) {
+        AddNote(sy, L"Clicks go to whichever window has focus.", IND);
+    } else {
+        Item* it = Push(g_list, *g_count, K_LINK, IC_APPWIN, L"Windows", g_x0, g_x1, sy, ROW_H);
+        lstrcpyW(it->text, L"Choose\x2026");
+        BuildChips(sy);
+    }
+
+    g_list = g_items; g_count = &g_nItems;
+}
+
+
+// ---- sub-rects ------------------------------------------------------------
+
+static int midY(const Item& it) { return it.rc.top + (it.kind == K_HEAD ? 18 : ROW_H / 2); }
+
+static RECT toggleRc(const Item& it) { int c = midY(it); return R(it.rc.right - 30, c - 8, it.rc.right, c + 8); }
+static RECT plusRc(const Item& it)   { int c = midY(it); return R(it.rc.right - 16, c - 10, it.rc.right, c + 10); }
+static RECT valueRc(const Item& it)  { RECT p = plusRc(it); return R(p.left - 4 - 48, p.top, p.left - 4, p.bottom); }
+static RECT minusRc(const Item& it)  { RECT v = valueRc(it); return R(v.left - 4 - 16, v.top, v.left - 4, v.bottom); }
+static RECT barRc(const Item& it)    { return R(it.rc.left + IND, it.rc.top + ROW_H, it.rc.right, it.rc.bottom); }
+static RECT trackRc(const Item& it)  { RECT b = barRc(it); return R(b.left, b.top + 5, b.right, b.top + 11); }
+
+static void BindText(const Item& it, wchar_t* out) {
+    if (g_listen == it.vk)  lstrcpyW(out, L"press a key\x2026");
+    else if (*it.vk == 0)   lstrcpyW(out, L"none");
+    else                    bm_DescribeKey(*it.vk, out, 48);
+}
+static RECT bindRc(const Item& it) {
+    wchar_t t[48]; BindText(it, t);
+    int w = TextW(g_fCtl, t); if (w < 40) w = 40;
+    int c = midY(it);
+    return R(it.rc.right - w, c - 10, it.rc.right, c + 10);
+}
+static RECT linkRc(const Item& it) {
+    int w = TextW(g_fCtl, it.text), c = midY(it);
+    return R(it.rc.right - w, c - 10, it.rc.right, c + 10);
+}
+static RECT segRc(const Item& it, int i) {
+    int x = it.rc.right, c = midY(it);
+    for (int k = it.nopts - 1; k >= 0; --k) {
+        int w = TextW(g_fCtl, it.opts[k]);
+        if (k == i) return R(x - w, c - 10, x, c + 10);
+        x -= w + 12;
+    }
+    return R(0, 0, 0, 0);
+}
+
+// Header and footer controls.
+static RECT rcClose() { return R(WIN_W - 10 - 22, 8, WIN_W - 10, 30); }
+static RECT rcMin()   { RECT c = rcClose(); return R(c.left - 2 - 22, 8, c.left - 2, 30); }
+static RECT rcGear()  { return R(12, BODY_BOT + 7, 34, BODY_BOT + 29); }
+static RECT rcApply() { return R(WIN_W - 12 - 92, BODY_BOT + 5, WIN_W - 12, BODY_BOT + 31); }
+static RECT rcDot(int i) {
+    int total = PAGE_COUNT * 6 + (PAGE_COUNT - 1) * 8;
+    int x = (WIN_W - total) / 2 + i * 14, cy = BODY_BOT + FT_H / 2;
+    return R(x, cy - 3, x + 6, cy + 3);
+}
+static RECT rcSheetX() { return R(WIN_W - 10 - 22, HDR_H + 6, WIN_W - 10, HDR_H + 28); }
+
+// ---- hit testing ----------------------------------------------------------
+// A hot code is item*16+part for page items, 400+item*16+part for the sheet,
+// and one of the H_ values for the fixed chrome.
+
+enum { H_NONE = 0, H_CLOSE = 1000, H_MIN, H_GEAR, H_APPLY, H_SHEETX, H_DOT0 = 1100 };
+
+static bool In(RECT r, POINT p, int pad = 0) { InflateRect(&r, pad, pad); return PtInRect(&r, p) != FALSE; }
+
+static int HitItem(const Item& it, POINT p) {
+    switch (it.kind) {
+    case K_HEAD:
+    case K_TOGGLE: return (it.hasToggle && In(toggleRc(it), p, 4)) ? PT_TOGGLE : PT_NONE;
+    case K_SLIDER:
+        if (In(minusRc(it), p)) return PT_MINUS;
+        if (In(plusRc(it), p))  return PT_PLUS;
+        if (In(valueRc(it), p)) return PT_VALUE;
+        if (In(barRc(it), p))   return PT_BAR;
+        return PT_NONE;
+    case K_BIND: return In(bindRc(it), p, 2) ? PT_BIND : PT_NONE;
+    case K_LINK: return In(linkRc(it), p, 2) ? PT_LINK : PT_NONE;
+    case K_SEG:
+        for (int i = 0; i < it.nopts; ++i) if (In(segRc(it, i), p, 3)) return PT_SEG0 + i;
+        return PT_NONE;
+    }
+    return PT_NONE;
+}
+
+static int HotTest(POINT p) {
+    if (In(rcClose(), p)) return H_CLOSE;
+    if (In(rcMin(), p))   return H_MIN;
+    if (g_gearOpen) {
+        if (In(rcSheetX(), p)) return H_SHEETX;
+        for (int i = 0; i < g_nSheet; ++i) {
+            int part = HitItem(g_sheet[i], p);
+            if (part) return 400 + i * 16 + part;
+        }
+        return H_NONE;
+    }
+    if (In(rcGear(), p))  return H_GEAR;
+    if (In(rcApply(), p)) return H_APPLY;
+    for (int i = 0; i < PAGE_COUNT; ++i) if (In(rcDot(i), p, 4)) return H_DOT0 + i;
+    for (int i = 0; i < g_nItems; ++i) {
+        int part = HitItem(g_items[i], p);
+        if (part) return i * 16 + part;
+    }
+    return H_NONE;
+}
+
+static int g_hot = H_NONE;
+static bool HotIs(int base, int idx, int part) { return g_hot == base + idx * 16 + part; }
+
+// ---- painting -------------------------------------------------------------
+
+static void DrawToggle(HDC dc, RECT rc, double t) {
+    FillRound(dc, rc, 8, Lerp(C_TOG_OFF, C_ACCENT, t));
+    float x = rc.left + 2 + (float)(14 * t);
+    FillCircle(dc, x + 6, rc.top + 8.0f, 6, Lerp(C_SOFT, RGB(255, 255, 255), t));
+}
+
+static void DrawRowHead(HDC dc, const Item& it) {
+    int c = midY(it);
+    DrawIcon(dc, it.icon, (float)it.rc.left, c - 7.0f, 14, C_MUTED);
+    RECT l = R(it.rc.left + IND, it.rc.top, it.rc.right, it.rc.top + ROW_H);
+    Txt(dc, it.label, l, C_TEXT, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+}
+
+static void PaintItem(HDC dc, const Item& it, int base, int idx) {
+    switch (it.kind) {
+    case K_HEAD: {
+        int c = midY(it);
+        DrawIcon(dc, it.icon, (float)it.rc.left, c - 8.0f, 16, C_ACCENT);
+        RECT l = R(it.rc.left + IND, c - 12, it.rc.right, c + 12);
+        Txt(dc, it.label, l, C_TEXT, g_fSection, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        if (it.hasToggle) DrawToggle(dc, toggleRc(it), toggleAnim(it.toggle)->cur);
+        FillBox(dc, R(it.rc.left, it.rc.bottom - 6, it.rc.right, it.rc.bottom - 5), C_EDGE);
+        break;
+    }
+    case K_TOGGLE:
+        DrawRowHead(dc, it);
+        DrawToggle(dc, toggleRc(it), toggleAnim(it.toggle)->cur);
+        break;
+
+    case K_SLIDER: {
+        DrawRowHead(dc, it);
+        RECT m = minusRc(it), p = plusRc(it), v = valueRc(it);
+        Txt(dc, L"\x2013", m, HotIs(base, idx, PT_MINUS) ? C_TEXT : C_MUTED, g_fCtl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        Txt(dc, L"+",      p, HotIs(base, idx, PT_PLUS)  ? C_TEXT : C_MUTED, g_fCtl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (g_editNum != it.num) {
+            wchar_t s[24]; FmtNum(it.num, s);
+            Txt(dc, s, v, C_TEXT, g_fCtl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        RECT tr = trackRc(it);
+        FillRound(dc, tr, 3, C_TRACK);
+        double f = (it.num->v - it.num->mn) / (it.num->mx - it.num->mn);
+        if (f < 0) f = 0;
+        if (f > 1) f = 1;
+        int fx = tr.left + (int)((tr.right - tr.left) * f + 0.5);
+        if (fx - tr.left >= 2) FillRound(dc, R(tr.left, tr.top, fx, tr.bottom), 3, C_ACCENT);
+        // Crosshair thumb, as in the reference design.
+        {
+            Gfx gx(dc);
+            G::Pen pen(GC(RGB(255, 255, 255)), 1.5f);
+            float cy = (tr.top + tr.bottom) / 2.0f;
+            gx.g.DrawLine(&pen, (float)fx, cy - 7.5f, (float)fx, cy + 7.5f);
+            gx.g.DrawLine(&pen, fx - 7.5f, cy, fx + 7.5f, cy);
+        }
+        break;
+    }
+
+    case K_BIND: {
+        DrawRowHead(dc, it);
+        wchar_t t[48]; BindText(it, t);
+        COLORREF c = C_MUTED;
+        if (g_listen == it.vk) {
+            double ph = 0.5 + 0.5 * cos(GetTickCount() % 1000 / 1000.0 * 6.2831853);
+            c = Lerp(C_ACCENT, C_BG, 0.6 * (1.0 - ph));
+        } else if (HotIs(base, idx, PT_BIND)) c = C_SOFT;
+        else if (*it.vk) c = C_SOFT;
+        Txt(dc, t, bindRc(it), c, g_fCtl, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        break;
+    }
+
+    case K_LINK:
+        DrawRowHead(dc, it);
+        Txt(dc, it.text, linkRc(it), HotIs(base, idx, PT_LINK) ? C_TEXT : C_SOFT, g_fCtl,
+            DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+        break;
+
+    case K_SEG:
+        DrawRowHead(dc, it);
+        for (int i = 0; i < it.nopts; ++i) {
+            RECT r = segRc(it, i);
+            bool on = (*it.sel == i);
+            COLORREF c = on ? C_TEXT : (HotIs(base, idx, PT_SEG0 + i) ? C_SOFT : C_MUTED);
+            Txt(dc, it.opts[i], r, c, g_fCtl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            if (on) FillBox(dc, R(r.left, r.bottom, r.right, r.bottom + 2), C_ACCENT);
+        }
+        break;
+
+    case K_NOTE: {
+        RECT r = it.rc; r.top += 2;
+        Txt(dc, it.text, r, C_MUTED, g_fSmall, DT_LEFT | DT_TOP | DT_WORDBREAK);
+        break;
+    }
+
+    case K_CHIPS:
+        for (int i = 0; i < g_nChips; ++i) {
+            FrameRound(dc, g_chipRc[i], 5, C_TRACK);
+            RECT t = g_chipRc[i]; t.left += 8; t.right -= 8;
+            Txt(dc, g_chipText[i], t, C_SOFT, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
+        if (g_chipMore[0])
+            Txt(dc, g_chipMore, g_chipMoreRc, C_MUTED, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        break;
+
+    }
+}
+
+static void PaintBody(HDC dc) {
+    FillBox(dc, R(0, HDR_H, WIN_W, BODY_BOT), C_BG);
+    int divBot = BODY_BOT - 12;
+    for (int i = 0; i < g_nDiv; ++i)
+        FillBox(dc, R(g_div[i], BODY_TOP + 4, g_div[i] + 1, divBot), C_EDGE);
+    for (int i = 0; i < g_nItems; ++i) PaintItem(dc, g_items[i], 0, i);
+}
+
+static void PaintHeader(HDC dc) {
+    FillBox(dc, R(0, 0, WIN_W, HDR_H), C_BG);
+    DrawMark(dc, 13, 11, 16);
+    RECT t = R(36, 0, WIN_W, HDR_H);
+    Txt(dc, L"LineAC", t, C_TEXT, g_fTitle, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    int x = 36 + TextW(g_fTitle, L"LineAC") + 8;
+
+    wchar_t pg[40];
+    wsprintfW(pg, L"\x00B7  %s", g_gearOpen ? L"Settings" : PAGES[g_page]);
+    RECT pr = R(x, 1, WIN_W, HDR_H);
+    Txt(dc, pg, pr, C_MUTED, g_fPage, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    x += TextW(g_fPage, pg) + 10;
+
+    // Pulses while any channel is actually clicking.
+    if (ae_IsActiveNow()) {
+        double ph = (GetTickCount() % 1000) / 1000.0;
+        float cy = HDR_H / 2.0f + 0.5f;
+        FillCircle(dc, (float)x, cy, 3.0f + 4.0f * (float)ph, C_ACCENT, (BYTE)(110 * (1.0 - ph)));
+        FillCircle(dc, (float)x, cy, 3.0f, C_ACCENT);
+    }
+
+    RECT m = rcMin(), c = rcClose();
+    DrawIcon(dc, IC_MINUS, m.left + 4.5f, m.top + 4.5f, 13, g_hot == H_MIN ? C_TEXT : C_MUTED);
+    DrawIcon(dc, IC_X, c.left + 4.5f, c.top + 4.5f, 13, g_hot == H_CLOSE ? C_TEXT : C_MUTED);
+}
+
+static void PaintFooter(HDC dc) {
+    FillBox(dc, R(0, BODY_BOT, WIN_W, WIN_H), C_BG);
+    RECT g = rcGear();
+    DrawIcon(dc, IC_GEAR, g.left + 4.0f, g.top + 4.0f, 14, g_hot == H_GEAR ? C_TEXT : C_MUTED);
+
+    for (int i = 0; i < PAGE_COUNT; ++i) {
+        RECT d = rcDot(i);
+        COLORREF c = (i == g_page) ? C_ACCENT : (g_hot == H_DOT0 + i ? C_DOT_HOT : C_DOT);
+        FillCircle(dc, d.left + 3.0f, d.top + 3.0f, 3.0f, c);
+    }
+
+    RECT a = rcApply();
+    bool done = GetTickCount() < g_flashUntil;
+    FillRound(dc, a, 5, done ? C_ACCENT : (g_hot == H_APPLY ? C_BTN_HOT : C_BTN));
+    Txt(dc, done ? L"Applied \x2713" : L"Apply", a, done ? RGB(255, 255, 255) : C_TEXT, g_fCtl,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+}
+
+// Painted at its open position; PaintAll slides it into place.
+static void PaintSheet(HDC dc) {
+    FillBox(dc, R(0, HDR_H, WIN_W, WIN_H), C_BG);
+    FillBox(dc, R(0, HDR_H, WIN_W, HDR_H + 1), C_EDGE);
+
+    RECT hd = R(COL_L0, HDR_H + 6, WIN_W, HDR_H + 28);
     Txt(dc, L"SETTINGS", hd, C_MUTED, g_fHead, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RECT x = rcSheetX();
+    DrawIcon(dc, IC_X, x.left + 4.5f, x.top + 4.5f, 13, g_hot == H_SHEETX ? C_TEXT : C_MUTED);
 
-    RECT tg  = gearConsoleToggle();
-    RECT lbl = R(pp.left + 13, gearRowTop(0), tg.left - 8, gearRowTop(0) + GP_ROW_H);
-    Txt(dc, L"Show Console", lbl, C_LABEL, g_fLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    DrawToggle(dc, tg, g_aConsole.cur);
+    for (int i = 0; i < g_nSheet; ++i) PaintItem(dc, g_sheet[i], 400, i);
 
-    int gsy = gearRowTop(GEAR_ROWS) + GP_SEP_GAP;
-    HPEN gp = CreatePen(PS_SOLID, 1, C_SEP);
-    HGDIOBJ ogp = SelectObject(dc, gp);
-    MoveToEx(dc, pp.left + 13, gsy, NULL); LineTo(dc, pp.right - 13, gsy);
-    SelectObject(dc, ogp); DeleteObject(gp);
+    FillBox(dc, R(g_sheetDiv, HDR_H + 40, g_sheetDiv + 1, BODY_BOT - 12), C_EDGE);
 
-    int iy = gsy + 1 + GP_SEP_GAP;
-    RECT l1 = R(pp.left + 13, iy,                 pp.right - 13, iy + GP_INFO_H);
-    RECT l2 = R(pp.left + 13, iy + GP_INFO_H,     pp.right - 13, iy + 2 * GP_INFO_H);
-    RECT l3 = R(pp.left + 13, iy + 2 * GP_INFO_H, pp.right - 13, iy + 3 * GP_INFO_H);
-    Txt(dc, L"This autoclicker was made by @slurov", l1, C_POPUP_TXT1, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    Txt(dc, L"YT — @slurov",     l2, C_POPUP_TXT, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-    Txt(dc, L"TikTok — @slurov", l3, C_POPUP_TXT, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    int y = g_creditsY;
+    FillBox(dc, R(COL_L0, y, g_sheetDiv - COL_GAP / 2, y + 1), RGB(0x15, 0x17, 0x1c));
+    y += 12;
+    RECT l1 = R(COL_L0, y, WIN_W, y + 18);
+    RECT l2 = R(COL_L0, y + 18, WIN_W, y + 36);
+    RECT l3 = R(COL_L0, y + 36, WIN_W, y + 54);
+    Txt(dc, L"This autoclicker was made by @slurov", l1, C_SOFT, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    Txt(dc, L"YT \x2014 @slurov",     l2, C_MUTED, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    Txt(dc, L"TikTok \x2014 @slurov", l3, C_MUTED, g_fSmall, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    RECT v = R(COL_L0, WIN_H - FT_H, WIN_W, WIN_H);
+    Txt(dc, L"v3.0.0", v, C_DIM, g_fPage, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+}
+
+static HDC NewLayer(HDC ref, HBITMAP* bmp) {
+    HDC dc = CreateCompatibleDC(ref);
+    *bmp = CreateCompatibleBitmap(ref, WIN_W, WIN_H);
+    SelectObject(dc, *bmp);
+    return dc;
+}
+
+static void PaintAll(HDC ref, HDC dc) {
+    PaintHeader(dc);
+
+    double pt = g_aPage.cur;
+    if (pt < 0.999) {
+        // New page slides in from the side it came from and fades up.
+        HBITMAP lb; HDC layer = NewLayer(ref, &lb);
+        PaintBody(layer);
+        FillBox(dc, R(0, HDR_H, WIN_W, BODY_BOT), C_BG);
+        int dx = (int)((1.0 - pt) * 14.0 * g_pageDir);
+        BLENDFUNCTION bf = { AC_SRC_OVER, 0, (BYTE)(pt * 255.0), 0 };
+        AlphaBlend(dc, dx, HDR_H, WIN_W, BODY_BOT - HDR_H, layer, 0, HDR_H, WIN_W, BODY_BOT - HDR_H, bf);
+        DeleteDC(layer); DeleteObject(lb);
+    } else {
+        PaintBody(dc);
+    }
+    PaintFooter(dc);
+
+    double st = g_aGear.cur;
+    if (st > 0.004) {
+        HBITMAP lb; HDC layer = NewLayer(ref, &lb);
+        PaintSheet(layer);
+        int full = WIN_H - HDR_H;
+        int off = (int)((1.0 - st) * full + 0.5);
+        BitBlt(dc, 0, HDR_H + off, WIN_W, full - off, layer, 0, HDR_H, SRCCOPY);
+        DeleteDC(layer); DeleteObject(lb);
+    }
+
+    if (!g_dwmRound) FrameRound(dc, R(0, 0, WIN_W, WIN_H), 8, C_EDGE);
+}
+
+// ---- behaviour ------------------------------------------------------------
+
+static bool AnimStep(Anim& a) {
+    double d = a.target - a.cur;
+    if (fabs(d) < 0.004) { a.cur = a.target; return false; }
+    a.cur += d * 0.26;
+    return true;
+}
+static void StartAnim(HWND hwnd) { SetTimer(hwnd, TIMER_ANIM, ANIM_MS, NULL); }
+
+static void GoPage(HWND hwnd, int p) {
+    if (p < 0 || p >= PAGE_COUNT || p == g_page) return;
+    g_pageDir = (p > g_page) ? 1 : -1;
+    g_page = p;
+    g_aPage.cur = 0.0; g_aPage.target = 1.0;
+    Rebuild();
+    StartAnim(hwnd);
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static void OpenSheet(HWND hwnd, bool open) {
+    g_gearOpen = open;
+    g_aGear.target = open ? 1.0 : 0.0;
+    StartAnim(hwnd);
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static void FlipToggle(HWND hwnd, int t) {
+    bool* f = toggleFlag(t);
+    *f = !*f;
+    toggleAnim(t)->target = *f ? 1.0 : 0.0;
+    if (t == TG_CONSOLE) { if (*f) con_Show(hwnd); else con_Hide(); }
+    if (t == TG_ALLOW) Rebuild();
+    StartAnim(hwnd);
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static void DoApply(HWND hwnd) {
+    Settings s = {};
+    s.allowAll     = g_allowAll;
+    s.targetCount  = g_targetCount;
+    for (int i = 0; i < g_targetCount; ++i) s.targets[i] = g_targets[i];
+    s.leftEnabled  = (g_bindL != 0);
+    s.rightEnabled = (g_bindR != 0);
+    s.leftCPS      = nL.v;
+    s.rightCPS     = nR.v;
+    s.pattern      = g_patternSel;
+    s.holdMode     = (g_modeSel == 0);
+    s.bindL        = g_bindL;
+    s.bindR        = g_bindR;
+    s.blockHitEnabled   = g_blockHit;
+    s.blockHitBPS       = nBps.v;
+    s.blockHitPauseBind = g_bindBlockPause;
+    s.blockHitPauseHold = (g_blockPauseModeSel == 0);
+    s.highCpsEnabled = g_highCps;
+    s.highCpsCPS     = nHigh.v;
+    s.highCpsBind    = g_bindHighCps;
+    s.customDuration = nDur.v;
+    s.customChance   = nChance.v;
+    s.customStrength = nStr.v;
+    s.limitedCps     = nLimit.v;
+    ae_Apply(s);
+
+    g_flashUntil = GetTickCount() + 1400;
+    g_flashShown = true;
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static void DoBind(HWND hwnd, int* vk) {
+    g_listen = vk;
+    InvalidateRect(hwnd, NULL, FALSE);
+    UpdateWindow(hwnd);
+    int got = bm_CaptureBind(hwnd);     // pumps messages until a key or button
+    if (got) *vk = got;
+    g_listen = NULL;
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
+static void SliderFromX(const Item& it, int x) {
+    RECT tr = trackRc(it);
+    double f = (double)(x - tr.left) / (tr.right - tr.left);
+    if (f < 0) f = 0;
+    if (f > 1) f = 1;
+    Num* n = it.num;
+    double v = n->mn + f * (n->mx - n->mn);
+    SetNum(n, floor(v / n->step + 0.5) * n->step);
+}
+
+// Double-clicking a value swaps in an edit box, so exact numbers like 12.5
+// can still be typed, as with the old input fields.
+static void BeginEdit(const Item& it) {
+    g_editNum = it.num;
+    RECT v = valueRc(it);
+    MoveWindow(g_hEdit, v.left, v.top + 1, v.right - v.left, v.bottom - v.top - 2, TRUE);
+    wchar_t s[24]; FmtDec(it.num->v, s, 2);
+    SetWindowTextW(g_hEdit, s);
+    ShowWindow(g_hEdit, SW_SHOW);
+    SetFocus(g_hEdit);
+    SendMessageW(g_hEdit, EM_SETSEL, 0, -1);
+    InvalidateRect(g_hwnd, NULL, FALSE);
+}
+static void EndEdit(bool commit) {
+    if (!g_editNum) return;
+    Num* n = g_editNum;
+    g_editNum = NULL;
+    if (commit) {
+        wchar_t buf[32] = {};
+        GetWindowTextW(g_hEdit, buf, 32);
+        wchar_t* end = NULL;
+        double v = wcstod(buf, &end);
+        if (end != buf) SetNum(n, v);
+    }
+    ShowWindow(g_hEdit, SW_HIDE);
+    SetFocus(g_hwnd);
+    InvalidateRect(g_hwnd, NULL, FALSE);
 }
 
 static LRESULT CALLBACK EditProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == WM_CHAR) {
         wchar_t c = (wchar_t)w;
+        if (c == 13 || c == 27) return 0;
         if (c == 8) {}
         else if (c == L'.') {
             wchar_t buf[32]; GetWindowTextW(h, buf, 32);
             if (wcschr(buf, L'.')) return 0;
         } else if (c < L'0' || c > L'9') return 0;
     }
+    if (m == WM_KEYDOWN && (w == VK_RETURN || w == VK_ESCAPE)) {
+        PostMessageW(GetParent(h), WM_APP_EDITDONE, w == VK_RETURN, 0);
+        return 0;
+    }
+    if (m == WM_KILLFOCUS) PostMessageW(GetParent(h), WM_APP_EDITDONE, 1, 0);
     return CallWindowProcW(g_oldEditProc, h, m, w, l);
 }
 
@@ -842,221 +1111,117 @@ static LRESULT CALLBACK RmbHookProc(int code, WPARAM wParam, LPARAM lParam) {
     return CallNextHookEx(g_rmbHook, code, wParam, lParam);
 }
 
-static void DoBindCh(HWND hwnd, int* bind, int* state, const RECT* badge) {
-    *state = BIND_WAITING;
-    InvalidateRect(hwnd, badge, FALSE);
-    UpdateWindow(hwnd);
-    int vk = bm_CaptureBind(hwnd);
-    if (vk) { *bind = vk; *state = BIND_BOUND; }
-    else    { *state = *bind ? BIND_BOUND : BIND_NOTSET; }
+static Num* g_drag = NULL;
+static int  g_dragItem = -1;
+
+static void OnClick(HWND hwnd, POINT p, bool dbl) {
+    if (g_editNum) EndEdit(true);
+    SetFocus(hwnd);
+
+    int h = HotTest(p);
+    if (h == H_CLOSE) { DestroyWindow(hwnd); return; }
+    if (h == H_MIN)   { ShowWindow(hwnd, SW_MINIMIZE); return; }
+    if (h == H_GEAR)  { OpenSheet(hwnd, true); return; }
+    if (h == H_SHEETX){ OpenSheet(hwnd, false); return; }
+    if (h == H_APPLY) { DoApply(hwnd); return; }
+    if (h >= H_DOT0 && h < H_DOT0 + PAGE_COUNT) { GoPage(hwnd, h - H_DOT0); return; }
+
+    if (h == H_NONE) {
+        if (p.y < HDR_H) {
+            ReleaseCapture();
+            SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        }
+        return;
+    }
+
+    bool sheet = (h >= 400);
+    int code = sheet ? h - 400 : h;
+    int idx = code / 16, part = code % 16;
+    Item& it = sheet ? g_sheet[idx] : g_items[idx];
+    switch (part) {
+    case PT_TOGGLE: FlipToggle(hwnd, it.toggle); break;
+    case PT_MINUS:  SetNum(it.num, it.num->v - it.num->step); break;
+    case PT_PLUS:   SetNum(it.num, it.num->v + it.num->step); break;
+    case PT_VALUE:  if (dbl) BeginEdit(it); break;
+    case PT_BAR:
+        g_drag = it.num; g_dragItem = idx;
+        SetCapture(hwnd);
+        SliderFromX(it, p.x);
+        break;
+    case PT_BIND:   DoBind(hwnd, it.vk); return;
+    case PT_LINK: {
+        HWND picked[MAX_TARGETS];
+        int n = ws_SelectWindows(hwnd, g_targets, g_targetCount, picked, MAX_TARGETS);
+        if (n >= 0) {
+            g_targetCount = n;
+            for (int i = 0; i < n; ++i) g_targets[i] = picked[i];
+        }
+        Rebuild();
+        break;
+    }
+    default:
+        if (part >= PT_SEG0) {
+            int v = part - PT_SEG0;
+            if (*it.sel != v) { *it.sel = v; Rebuild(); }
+        }
+    }
     InvalidateRect(hwnd, NULL, FALSE);
 }
 
-static void DoApply(HWND hwnd) {
-    Settings s = {};
-    s.allowAll     = g_allowAll;
-    s.targetCount  = g_targetCount;
-    for (int i = 0; i < g_targetCount; ++i) s.targets[i] = g_targets[i];
-    s.leftEnabled  = (g_bindL != 0);
-    s.rightEnabled = (g_bindR != 0);
-    s.leftCPS      = readCps(g_hEditL);
-    s.rightCPS     = readCps(g_hEditR);
-    s.pattern      = g_patternSel;
-    s.holdMode     = (g_modeSel == 0);
-    s.bindL        = g_bindL;
-    s.bindR        = g_bindR;
-    s.blockHitEnabled = g_blockHit;
-    s.blockHitBPS     = readCps(g_hEditBPS);
-    s.blockHitPauseBind = g_bindBlockPause;
-    s.blockHitPauseHold = (g_blockPauseModeSel == 0);
-    s.highCpsEnabled  = g_highCps;
-    s.highCpsCPS      = readCps(g_hEditHighCps);
-    s.highCpsBind     = g_bindHighCps;
-    s.customDuration  = readCps(g_hEditDuration);
-    s.customChance    = readCps(g_hEditChance);
-    s.customStrength  = readCps(g_hEditStrength);
-    s.limitedCps      = readCps(g_hEditLimited);
-    ae_Apply(s);
-
-    wchar_t lc[16], rc[16], bc[16], hc[16];
-    fmt2(s.leftCPS, lc);     SetWindowTextW(g_hEditL, lc);
-    fmt2(s.rightCPS, rc);    SetWindowTextW(g_hEditR, rc);
-    fmt2(s.blockHitBPS, bc); SetWindowTextW(g_hEditBPS, bc);
-    fmt2(s.highCpsCPS, hc);  SetWindowTextW(g_hEditHighCps, hc);
-    if (g_customVisible) {
-        wchar_t cd[16], cc[16], cs[16];
-        fmt2(s.customDuration, cd); SetWindowTextW(g_hEditDuration, cd);
-        fmt2(s.customChance, cc);   SetWindowTextW(g_hEditChance, cc);
-        fmt2(s.customStrength, cs); SetWindowTextW(g_hEditStrength, cs);
+static void ApplyCorners(HWND hwnd) {
+    DWORD round = 2;                                    // DWMWCP_ROUND
+    g_dwmRound = SUCCEEDED(DwmSetWindowAttribute(hwnd, 33, &round, sizeof(round)));
+    if (g_dwmRound) {
+        COLORREF edge = C_EDGE;
+        DwmSetWindowAttribute(hwnd, 34, &edge, sizeof(edge));   // DWMWA_BORDER_COLOR
+    } else {
+        SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, WIN_W + 1, WIN_H + 1, 16, 16), TRUE);
     }
-    if (g_blatantVisible) {
-        wchar_t li[16]; fmt2(s.limitedCps, li); SetWindowTextW(g_hEditLimited, li);
-    }
-
-    g_flashUntil = GetTickCount() + 1400;
-    InvalidateRect(hwnd, NULL, FALSE);
 }
 
-static int HotTest(POINT p) {
-    if (PtInRect(&rcCls, p)) return EL_CLS;
-    if (PtInRect(&rcMin, p)) return EL_MIN;
-    if (PtInRect(&rcGear, p)) return EL_GEAR;
-    if (PtInRect(&rcToggle, p)) return EL_TOGGLE;
-    if (PtInRect(&rcBlockToggle, p)) return EL_BLOCKTOGGLE;
-    if (PtInRect(&rcHighCpsToggle, p)) return EL_HIGHCPSTOGGLE;
-    if (!g_allowAll && PtInRect(&rcSel, p)) return EL_SEL;
-    if (PtInRect(&rcBindL, p)) return EL_BINDL;
-    if (PtInRect(&rcBindR, p)) return EL_BINDR;
-    if (g_highCps && PtInRect(&rcBindHighCps, p)) return EL_BINDHIGHCPS;
-    if (g_blockHit && PtInRect(&rcBlockPauseBindBtn, p)) return EL_BINDBLOCKPAUSE;
-    if (PtInRect(&rcPattern, p)) return EL_PATTERN;
-    if (PtInRect(&rcMode, p)) return EL_MODE;
-    if (PtInRect(&rcApply, p)) return EL_APPLY;
-    return EL_NONE;
-}
-
-static void MoveEdit(HWND e, const RECT& rc) {
-    MoveWindow(e, rc.left + 1, rc.top + 1, (rc.right - rc.left) - 2, (rc.bottom - rc.top) - 2, TRUE);
-}
-
-
-// Visibility mirrors what UpdatePatternCards set up; only the gear panel hides
-// them wholesale so the backdrop can be blurred without sharp controls on top.
-static void ShowEdits(bool show) {
-    ShowWindow(g_hEditL,        show ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditR,        show ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditBPS,      show ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditHighCps,  show ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditDuration, (show && g_customVisible)  ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditChance,   (show && g_customVisible)  ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditStrength, (show && g_customVisible)  ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditLimited,  (show && g_blatantVisible) ? SW_SHOW : SW_HIDE);
-}
-
-// WM_TIMER stops the frame timer again once every animation has settled.
-static void StartAnim(HWND hwnd) {
-    SetTimer(hwnd, TIMER_ANIM, ANIM_MS, NULL);
-}
-
-static void OpenGear(HWND hwnd, bool open) {
-    g_gearOpen = open;
-    g_aGear.target = open ? 1.0 : 0.0;
-    if (open) {
-        g_blurValid = false;                       // backdrop changed since last time
-        if (!g_editsHidden) { g_editsHidden = true; ShowEdits(false); }
-    }
-    StartAnim(hwnd);
-    InvalidateRect(hwnd, NULL, FALSE);
-}
-
-static void UpdatePatternCards(HWND hwnd) {
-    bool nowCustom  = (g_patternSel == PATTERN_CUSTOM);
-    bool nowBlatant = (g_patternSel == PATTERN_BLATANT);
-    if (nowCustom == g_customVisible && nowBlatant == g_blatantVisible) return;
-    g_customVisible  = nowCustom;
-    g_blatantVisible = nowBlatant;
-    if (!nowBlatant) g_limitedTip = false;
-
-    Layout();
-
-    MoveEdit(g_hEditL, rcInpL);
-    MoveEdit(g_hEditR, rcInpR);
-    MoveEdit(g_hEditHighCps, rcInpHighCps);
-    MoveEdit(g_hEditBPS, rcInpBPS);
-    if (nowCustom) {
-        MoveEdit(g_hEditDuration, rcInpDuration);
-        MoveEdit(g_hEditChance,   rcInpChance);
-        MoveEdit(g_hEditStrength, rcInpStrength);
-    }
-    if (nowBlatant) MoveEdit(g_hEditLimited, rcInpLimited);
-
-    ShowWindow(g_hEditDuration, nowCustom ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditChance,   nowCustom ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_hEditStrength, nowCustom ? SW_SHOW : SW_HIDE);
-    EnableWindow(g_hEditDuration, nowCustom);
-    EnableWindow(g_hEditChance,   nowCustom);
-    EnableWindow(g_hEditStrength, nowCustom);
-    ShowWindow(g_hEditLimited, nowBlatant ? SW_SHOW : SW_HIDE);
-    EnableWindow(g_hEditLimited, nowBlatant);
-
-    SetWindowPos(hwnd, NULL, 0, 0, WIN_W, g_winH, SWP_NOMOVE | SWP_NOZORDER);
-    SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, WIN_W + 1, g_winH + 1, 16, 16), TRUE);
-    InvalidateRect(hwnd, NULL, TRUE);
+static HFONT Font(int px, int weight) {
+    return CreateFontW(-px, 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET, 0, 0,
+                       CLEARTYPE_QUALITY, 0, L"Segoe UI");
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE: {
-        Layout();
-        g_fTitle = CreateFontW(-12, 0,0,0, FW_MEDIUM,    0,0,0, DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0, L"Segoe UI");
-        g_fLabel = CreateFontW(-13, 0,0,0, FW_NORMAL,    0,0,0, DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0, L"Segoe UI");
-        g_fHead  = CreateFontW(-10, 0,0,0, FW_BOLD,      0,0,0, DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0, L"Segoe UI");
-        g_fSmall = CreateFontW(-11, 0,0,0, FW_NORMAL,    0,0,0, DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0, L"Segoe UI");
-        g_fInput = CreateFontW(-12, 0,0,0, FW_NORMAL,    0,0,0, DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0, L"Segoe UI");
-        g_fApply = CreateFontW(-13, 0,0,0, FW_SEMIBOLD,  0,0,0, DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0, L"Segoe UI");
-        g_fArrow = CreateFontW(-9,  0,0,0, FW_NORMAL,    0,0,0, DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0, L"Segoe UI");
-        g_inputBrush = CreateSolidBrush(C_BAR);
-        g_disabledBrush = CreateSolidBrush(C_SEL_DISBG);
+        g_hwnd = hwnd;
+        g_fTitle = Font(14, FW_BOLD);
+        g_fPage  = Font(11, FW_SEMIBOLD);
+        g_fLabel = Font(13, FW_SEMIBOLD);
+        g_fCtl   = Font(12, FW_SEMIBOLD);
+        g_fSmall = Font(11, FW_NORMAL);
+        g_fStat  = Font(24, FW_BOLD);
+        g_fHead  = Font(11, FW_BOLD);
+        g_fSection = Font(15, FW_BOLD);
+        g_fieldBrush = CreateSolidBrush(C_FIELD);
+        g_measure = CreateCompatibleDC(NULL);
 
-        DWORD es = WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_RIGHT;
-        g_hEditL = CreateWindowExW(0, L"EDIT", L"20.00", es,
-            rcInpL.left + 1, rcInpL.top + 1, (rcInpL.right - rcInpL.left) - 2, (rcInpL.bottom - rcInpL.top) - 2,
-            hwnd, (HMENU)ID_EDIT_L, GetModuleHandleW(NULL), NULL);
-        g_hEditR = CreateWindowExW(0, L"EDIT", L"20.00", es,
-            rcInpR.left + 1, rcInpR.top + 1, (rcInpR.right - rcInpR.left) - 2, (rcInpR.bottom - rcInpR.top) - 2,
-            hwnd, (HMENU)ID_EDIT_R, GetModuleHandleW(NULL), NULL);
-        g_hEditBPS = CreateWindowExW(0, L"EDIT", L"10.00", es,
-            rcInpBPS.left + 1, rcInpBPS.top + 1, (rcInpBPS.right - rcInpBPS.left) - 2, (rcInpBPS.bottom - rcInpBPS.top) - 2,
-            hwnd, (HMENU)ID_EDIT_BPS, GetModuleHandleW(NULL), NULL);
-        g_hEditHighCps = CreateWindowExW(0, L"EDIT", L"20.00", es,
-            rcInpHighCps.left + 1, rcInpHighCps.top + 1, (rcInpHighCps.right - rcInpHighCps.left) - 2, (rcInpHighCps.bottom - rcInpHighCps.top) - 2,
-            hwnd, (HMENU)ID_EDIT_HIGHCPS, GetModuleHandleW(NULL), NULL);
-
-        g_hEditDuration = CreateWindowExW(0, L"EDIT", L"5.00", es, 0, 0, 10, 10,
-            hwnd, (HMENU)ID_EDIT_DURATION, GetModuleHandleW(NULL), NULL);
-        g_hEditChance   = CreateWindowExW(0, L"EDIT", L"100.00", es, 0, 0, 10, 10,
-            hwnd, (HMENU)ID_EDIT_CHANCE, GetModuleHandleW(NULL), NULL);
-        g_hEditStrength = CreateWindowExW(0, L"EDIT", L"55.00", es, 0, 0, 10, 10,
-            hwnd, (HMENU)ID_EDIT_STRENGTH, GetModuleHandleW(NULL), NULL);
-
-        g_hEditLimited = CreateWindowExW(0, L"EDIT", L"0.00", es, 0, 0, 10, 10,
-            hwnd, (HMENU)ID_EDIT_LIMITED, GetModuleHandleW(NULL), NULL);
-        HWND edits[8] = { g_hEditL, g_hEditR, g_hEditBPS, g_hEditHighCps,
-                          g_hEditDuration, g_hEditChance, g_hEditStrength, g_hEditLimited };
-        for (int i = 0; i < 8; ++i) {
-            SendMessageW(edits[i], WM_SETFONT, (WPARAM)g_fInput, TRUE);
-            SendMessageW(edits[i], EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELONG(6, 8));
-            SendMessageW(edits[i], EM_LIMITTEXT, 6, 0);
-            WNDPROC prev = (WNDPROC)SetWindowLongPtrW(edits[i], GWLP_WNDPROC, (LONG_PTR)EditProc);
-            if (i == 0) g_oldEditProc = prev;
+        for (int i = 0; i < IC_COUNT; ++i) {
+            g_icons[i] = new G::GraphicsPath();
+            ParsePath(*g_icons[i], ICON_SVG[i]);
         }
 
-        EnableWindow(g_hEditBPS, FALSE);
-        EnableWindow(g_hEditHighCps, FALSE);
-        ShowWindow(g_hEditDuration, SW_HIDE); EnableWindow(g_hEditDuration, FALSE);
-        ShowWindow(g_hEditChance,   SW_HIDE); EnableWindow(g_hEditChance,   FALSE);
-        ShowWindow(g_hEditStrength, SW_HIDE); EnableWindow(g_hEditStrength, FALSE);
-        ShowWindow(g_hEditLimited,  SW_HIDE); EnableWindow(g_hEditLimited,  FALSE);
+        g_hEdit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | ES_CENTER | ES_AUTOHSCROLL,
+                                  0, 0, 10, 10, hwnd, NULL, GetModuleHandleW(NULL), NULL);
+        SendMessageW(g_hEdit, WM_SETFONT, (WPARAM)g_fCtl, TRUE);
+        SendMessageW(g_hEdit, EM_LIMITTEXT, 6, 0);
+        g_oldEditProc = (WNDPROC)SetWindowLongPtrW(g_hEdit, GWLP_WNDPROC, (LONG_PTR)EditProc);
 
-        SetWindowRgn(hwnd, CreateRoundRectRgn(0, 0, WIN_W + 1, g_winH + 1, 16, 16), TRUE);
-        SetTimer(hwnd, TIMER_STATUS, 100, NULL);
+        Rebuild();
+        ApplyCorners(hwnd);
+        SetTimer(hwnd, TIMER_TICK, TICK_MS, NULL);
         g_rmbHook = SetWindowsHookExW(WH_MOUSE_LL, RmbHookProc, GetModuleHandleW(NULL), 0);
         return 0;
     }
 
     case WM_CTLCOLOREDIT: {
         HDC dc = (HDC)wp;
-        SetBkColor(dc, C_BAR);
-        SetTextColor(dc, C_INPUT_TXT);
-        return (LRESULT)g_inputBrush;
-    }
-
-    case WM_CTLCOLORSTATIC: {
-
-        HDC dc = (HDC)wp;
-        SetBkColor(dc, C_SEL_DISBG);
-        SetTextColor(dc, C_SEL_DISTXT);
-        return (LRESULT)g_disabledBrush;
+        SetBkColor(dc, C_FIELD);
+        SetTextColor(dc, C_TEXT);
+        return (LRESULT)g_fieldBrush;
     }
 
     case WM_ERASEBKGND:
@@ -1064,74 +1229,49 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps);
-        RECT cr; GetClientRect(hwnd, &cr);
-        int w = cr.right, h = cr.bottom;
-
-        HDC mem = CreateCompatibleDC(hdc);
-        HBITMAP bmp = CreateCompatibleBitmap(hdc, w, h);
-        HGDIOBJ ob = SelectObject(mem, bmp);
-        PaintAll(mem, cr);
-
-        // Gear panel open: a blurred, gently dimmed copy of the backdrop fades
-        // in underneath it. The blur itself is built once per opening.
-        double ga = g_aGear.cur;
-        if (ga > 0.004) {
-            if (!g_blurValid) BuildBlur(hdc, mem, w, h);
-            if (g_blurValid) BlendLayer(mem, g_blurDc, w, h, ga);
-
-            HDC layer = CreateCompatibleDC(hdc);
-            HBITMAP lb = CreateCompatibleBitmap(hdc, w, h);
-            HGDIOBJ olb = SelectObject(layer, lb);
-            BitBlt(layer, 0, 0, w, h, mem, 0, 0, SRCCOPY);
-            PaintGearPanel(layer);
-            BlendLayer(mem, layer, w, h, ga);
-            SelectObject(layer, olb); DeleteObject(lb); DeleteDC(layer);
-        }
-
+        HBITMAP bmp; HDC mem = NewLayer(hdc, &bmp);
+        PaintAll(hdc, mem);
         BitBlt(hdc, ps.rcPaint.left, ps.rcPaint.top,
                ps.rcPaint.right - ps.rcPaint.left, ps.rcPaint.bottom - ps.rcPaint.top,
                mem, ps.rcPaint.left, ps.rcPaint.top, SRCCOPY);
-        SelectObject(mem, ob); DeleteObject(bmp); DeleteDC(mem);
+        DeleteDC(mem); DeleteObject(bmp);
         EndPaint(hwnd, &ps);
         return 0;
     }
-
 
     case WM_TIMER:
         if (wp == TIMER_ANIM) {
             bool busy = false;
             for (int i = 0; i < (int)(sizeof(g_anims) / sizeof(g_anims[0])); ++i)
                 if (AnimStep(*g_anims[i])) busy = true;
-            if (!busy) {
-                KillTimer(hwnd, TIMER_ANIM);
-                if (g_aGear.cur == 0.0 && g_editsHidden) { g_editsHidden = false; ShowEdits(true); }
-            }
+            if (!busy) KillTimer(hwnd, TIMER_ANIM);
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
-        if (wp == TIMER_STATUS) {
-            bool now = ae_IsActiveNow();
-            if (now != g_lastActive || GetTickCount() < g_flashUntil + 200) {
-                g_lastActive = now;
-                InvalidateRect(hwnd, &rcStatusBar, FALSE);
+        if (wp == TIMER_TICK) {
+            bool active = ae_IsActiveNow();
+            if (active || active != g_lastActive) {
+                RECT hr = R(0, 0, WIN_W, HDR_H);
+                InvalidateRect(hwnd, &hr, FALSE);
             }
+            g_lastActive = active;
 
-            bool tip = false;
-            if (g_blatantVisible && !g_openCombo && !g_gearOpen) {
-                POINT cp; GetCursorPos(&cp); ScreenToClient(hwnd, &cp);
-                tip = (PtInRect(&rcCardLimited, cp) != FALSE);
+            if (g_flashShown && GetTickCount() >= g_flashUntil) {
+                g_flashShown = false;
+                RECT fr = R(0, BODY_BOT, WIN_W, WIN_H);
+                InvalidateRect(hwnd, &fr, FALSE);
             }
-            if (tip != g_limitedTip) { g_limitedTip = tip; InvalidateRect(hwnd, NULL, FALSE); }
+            if (g_listen) InvalidateRect(hwnd, NULL, FALSE);
         }
         return 0;
 
     case WM_MOUSEMOVE: {
         POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
-        if (g_openCombo) {
-            RECT base = comboRectOf(g_openCombo);
-            int n = comboCount(g_openCombo), hot = -1;
-            for (int i = 0; i < n; ++i) { RECT it = comboItem(base, i); if (PtInRect(&it, p)) hot = i; }
-            if (hot != g_comboHot) { g_comboHot = hot; InvalidateRect(hwnd, NULL, FALSE); }
+        if (g_drag && g_dragItem >= 0) {
+            double before = g_drag->v;
+            SliderFromX(g_items[g_dragItem], p.x);
+            if (g_drag->v != before) InvalidateRect(hwnd, NULL, FALSE);
+            return 0;
         }
         int h = HotTest(p);
         if (h != g_hot) {
@@ -1144,98 +1284,47 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
 
     case WM_MOUSELEAVE:
-        if (g_hot != EL_NONE) { g_hot = EL_NONE; InvalidateRect(hwnd, NULL, FALSE); }
+        if (g_hot != H_NONE) { g_hot = H_NONE; InvalidateRect(hwnd, NULL, FALSE); }
         return 0;
 
-    case WM_LBUTTONDOWN: {
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDBLCLK: {
         POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+        OnClick(hwnd, p, msg == WM_LBUTTONDBLCLK);
+        return 0;
+    }
 
-        if (g_openCombo) {
-            int which = g_openCombo;
-            RECT base = comboRectOf(which);
-            int n = comboCount(which);
-            for (int i = 0; i < n; ++i) {
-                RECT it = comboItem(base, i);
-                if (PtInRect(&it, p)) { *comboSelOf(which) = i; break; }
-            }
-            g_openCombo = 0; g_comboHot = -1;
-            InvalidateRect(hwnd, NULL, FALSE);
-            if (which == EL_PATTERN) UpdatePatternCards(hwnd);
-            return 0;
-        }
+    case WM_LBUTTONUP:
+        if (g_drag) { g_drag = NULL; g_dragItem = -1; ReleaseCapture(); }
+        return 0;
 
-        if (PtInRect(&rcCls, p)) { DestroyWindow(hwnd); return 0; }
-        if (PtInRect(&rcMin, p)) { ShowWindow(hwnd, SW_MINIMIZE); return 0; }
-        if (PtInRect(&rcGear, p)) { OpenGear(hwnd, !g_gearOpen); return 0; }
+    case WM_CAPTURECHANGED:
+        g_drag = NULL; g_dragItem = -1;
+        return 0;
 
-        if (g_gearOpen) {
-            RECT tg = gearConsoleToggle();
-            if (PtInRect(&tg, p)) {
-                g_showConsole = !g_showConsole;
-                g_aConsole.target = g_showConsole ? 1.0 : 0.0;
-                if (g_showConsole) con_Show(hwnd); else con_Hide();
-                StartAnim(hwnd);
+    case WM_MOUSEWHEEL: {
+        if (g_gearOpen) return 0;
+        POINT p = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+        ScreenToClient(hwnd, &p);
+        int dir = GET_WHEEL_DELTA_WPARAM(wp) > 0 ? 1 : -1;
+        for (int i = 0; i < g_nItems; ++i) {
+            if (g_items[i].kind == K_SLIDER && PtInRect(&g_items[i].rc, p)) {
+                SetNum(g_items[i].num, g_items[i].num->v + dir * g_items[i].num->step);
                 InvalidateRect(hwnd, NULL, FALSE);
-                return 0;                       // the panel stays open while you flip switches
+                break;
             }
-            RECT pp = gearPopupRect();
-            bool insidePanel = (PtInRect(&pp, p) != FALSE);
-            OpenGear(hwnd, false);
-            if (insidePanel) return 0;          // never let a click fall through to the card beneath
         }
-
-        if (PtInRect(&rcToggle, p)) {
-            g_allowAll = !g_allowAll;
-            g_aAllow.target = g_allowAll ? 1.0 : 0.0;
-            StartAnim(hwnd);
-            SetFocus(hwnd); InvalidateRect(hwnd, NULL, FALSE); return 0;
-        }
-        if (PtInRect(&rcBlockToggle, p)) {
-            g_blockHit = !g_blockHit;
-            g_aBlock.target = g_blockHit ? 1.0 : 0.0;
-            EnableWindow(g_hEditBPS, g_blockHit);
-            StartAnim(hwnd);
-            SetFocus(hwnd); InvalidateRect(hwnd, NULL, FALSE); return 0;
-        }
-        if (PtInRect(&rcHighCpsToggle, p)) {
-            g_highCps = !g_highCps;
-            g_aHigh.target = g_highCps ? 1.0 : 0.0;
-            EnableWindow(g_hEditHighCps, g_highCps);
-            StartAnim(hwnd);
-            SetFocus(hwnd); InvalidateRect(hwnd, NULL, FALSE); return 0;
-        }
-        if (!g_allowAll && PtInRect(&rcSel, p)) {
-            HWND picked[MAX_TARGETS];
-            int n = ws_SelectWindows(hwnd, g_targets, g_targetCount, picked, MAX_TARGETS);
-            if (n >= 0) {
-                g_targetCount = n;
-                for (int i = 0; i < n; ++i) g_targets[i] = picked[i];
-            }
-            InvalidateRect(hwnd, NULL, FALSE); return 0;
-        }
-        if (PtInRect(&rcBindL, p)) { DoBindCh(hwnd, &g_bindL, &g_bindLState, &rcBadgeL); return 0; }
-        if (PtInRect(&rcBindR, p)) { DoBindCh(hwnd, &g_bindR, &g_bindRState, &rcBadgeR); return 0; }
-        if (g_highCps && PtInRect(&rcBindHighCps, p)) { DoBindCh(hwnd, &g_bindHighCps, &g_bindHighCpsState, &rcBadgeHighCps); return 0; }
-        if (g_blockHit && PtInRect(&rcBlockPauseBindBtn, p)) { DoBindCh(hwnd, &g_bindBlockPause, &g_bindBlockPauseState, &rcBlockPauseBadge); return 0; }
-        if (PtInRect(&rcPattern, p)) { g_openCombo = EL_PATTERN; g_comboHot = -1; InvalidateRect(hwnd, NULL, FALSE); return 0; }
-        if (PtInRect(&rcMode, p))    { g_openCombo = EL_MODE;    g_comboHot = -1; InvalidateRect(hwnd, NULL, FALSE); return 0; }
-        if (g_blockHit && PtInRect(&rcBlockPauseMode, p)) { g_openCombo = EL_BLOCKPAUSEMODE; g_comboHot = -1; InvalidateRect(hwnd, NULL, FALSE); return 0; }
-        if (PtInRect(&rcApply, p)) { DoApply(hwnd); return 0; }
-
-        if (PtInRect(&rcTitlebar, p)) {
-            ReleaseCapture();
-            SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
-            return 0;
-        }
-        SetFocus(hwnd);
         return 0;
     }
 
     case WM_KEYDOWN:
-        if (wp == VK_ESCAPE) {
-            if (g_openCombo) { g_openCombo = 0; g_comboHot = -1; InvalidateRect(hwnd, NULL, FALSE); return 0; }
-            if (g_gearOpen)  { OpenGear(hwnd, false); return 0; }
-        }
+        if (wp == VK_ESCAPE && g_gearOpen) { OpenSheet(hwnd, false); return 0; }
+        if (!g_gearOpen && wp == VK_LEFT)  { GoPage(hwnd, g_page - 1); return 0; }
+        if (!g_gearOpen && wp == VK_RIGHT) { GoPage(hwnd, g_page + 1); return 0; }
+        return 0;
+
+    case WM_APP_EDITDONE:
+        EndEdit(wp != 0);
         return 0;
 
     case WM_LINEAC_CONSOLE_CLOSED:
@@ -1251,13 +1340,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_DESTROY:
         con_Shutdown();
-        FreeBlur();
         if (g_rmbHook) { UnhookWindowsHookEx(g_rmbHook); g_rmbHook = NULL; }
-        KillTimer(hwnd, TIMER_STATUS);
+        KillTimer(hwnd, TIMER_TICK);
         KillTimer(hwnd, TIMER_ANIM);
-        DeleteObject(g_fTitle); DeleteObject(g_fLabel); DeleteObject(g_fHead);
-        DeleteObject(g_fSmall); DeleteObject(g_fInput); DeleteObject(g_fApply);
-        DeleteObject(g_fArrow); DeleteObject(g_inputBrush); DeleteObject(g_disabledBrush);
+        for (int i = 0; i < IC_COUNT; ++i) { delete g_icons[i]; g_icons[i] = NULL; }
+        DeleteObject(g_fTitle); DeleteObject(g_fPage); DeleteObject(g_fLabel);
+        DeleteObject(g_fCtl);   DeleteObject(g_fSmall); DeleteObject(g_fStat);
+        DeleteObject(g_fHead);  DeleteObject(g_fSection); DeleteObject(g_fieldBrush);
+        DeleteDC(g_measure);
         PostQuitMessage(0);
         return 0;
     }
@@ -1275,22 +1365,23 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
 
     timeBeginPeriod(1);
 
+    G::GdiplusStartupInput gsi;
+    G::GdiplusStartup(&g_gdipToken, &gsi, NULL);
+
     INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_LISTVIEW_CLASSES };
     InitCommonControlsEx(&icc);
 
     WNDCLASSEXW wc = { sizeof(wc) };
-    wc.style         = CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW;
+    wc.style         = CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW | CS_DBLCLKS;
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInst;
     wc.hCursor       = LoadCursorW(NULL, IDC_ARROW);
     wc.lpszClassName = L"LineacAutoClickerWnd";
     RegisterClassExW(&wc);
 
-    Layout();
-
     int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
     HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName, L"LineAC",
-        WS_POPUP | WS_CLIPCHILDREN, (sw - WIN_W) / 2, (sh - g_winH) / 2, WIN_W, g_winH,
+        WS_POPUP | WS_CLIPCHILDREN | WS_MINIMIZEBOX, (sw - WIN_W) / 2, (sh - WIN_H) / 2, WIN_W, WIN_H,
         NULL, NULL, hInst, NULL);
 
     ae_Start();
@@ -1304,6 +1395,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     }
 
     ae_Stop();
+    G::GdiplusShutdown(g_gdipToken);
     timeEndPeriod(1);
     if (mutex) { ReleaseMutex(mutex); CloseHandle(mutex); }
     return 0;
